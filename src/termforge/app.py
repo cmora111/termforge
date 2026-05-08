@@ -26,12 +26,14 @@ from tkinter import (
     X,
     Y,
     Button,
+    Checkbutton,
     Entry,
     Frame,
     Label,
     Listbox,
     Menu,
     OptionMenu,
+    IntVar,
     Scrollbar,
     StringVar,
     filedialog,
@@ -231,6 +233,290 @@ class MultiFieldPrompt:
         self.parent.wait_window(self.window)
         return self.result
 
+
+class ScheduleManagerWindow:
+    def __init__(self, app):
+        self.app = app
+        self.window = Toplevel(app.root)
+        self.window.title("Schedule Manager")
+        self.window.geometry("980x560")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Schedule Manager",
+            bd=4,
+            width=32,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(action_row, text="Save", width=14, bg="darkgreen", fg="white", command=self.save_schedule).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="New / Clear", width=14, bg="#555555", fg="white", command=self.clear_form).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Delete", width=14, bg="#7f6000", fg="white", command=self.delete_schedule).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Enable/Disable", width=16, bg="#2f5597", fg="white", command=self.toggle_enabled).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Run Now", width=14, bg="#3d6d3d", fg="white", command=self.run_now).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
+
+        body = Frame(outer)
+        body.pack(fill=BOTH, expand=True)
+
+        left = Frame(body)
+        left.pack(side=LEFT, fill=Y)
+
+        right = Frame(body)
+        right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
+
+        self.listbox = Listbox(left, width=42, height=22)
+        self.listbox.pack(side=LEFT, fill=Y)
+
+        scrollbar = Scrollbar(left, command=self.listbox.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self.listbox.config(yscrollcommand=scrollbar.set)
+
+        form = Frame(right)
+        form.pack(fill=X)
+
+        self.name_var = StringVar()
+        self.category_var = StringVar()
+        self.command_var = StringVar()
+        self.type_var = StringVar(value="interval_minutes")
+        self.time_var = StringVar()
+        self.minutes_var = StringVar(value="1")
+        self.enabled_var = IntVar(value=1)
+
+        Label(form, text="Name:", width=16, anchor="w").grid(row=0, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.name_var, width=42).grid(row=0, column=1, sticky="ew", pady=3)
+
+        Label(form, text="Category:", width=16, anchor="w").grid(row=1, column=0, sticky="w", pady=3)
+        self.category_menu = OptionMenu(form, self.category_var, "")
+        self.category_menu.config(width=38)
+        self.category_menu.grid(row=1, column=1, sticky="w", pady=3)
+
+        Label(form, text="Command:", width=16, anchor="w").grid(row=2, column=0, sticky="w", pady=3)
+        self.command_menu = OptionMenu(form, self.command_var, "")
+        self.command_menu.config(width=38)
+        self.command_menu.grid(row=2, column=1, sticky="w", pady=3)
+
+        Label(form, text="Type:", width=16, anchor="w").grid(row=3, column=0, sticky="w", pady=3)
+        self.type_menu = OptionMenu(form, self.type_var, "startup", "daily", "interval_minutes")
+        self.type_menu.config(width=38)
+        self.type_menu.grid(row=3, column=1, sticky="w", pady=3)
+
+        Label(form, text="Daily Time HH:MM:", width=16, anchor="w").grid(row=4, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.time_var, width=42).grid(row=4, column=1, sticky="ew", pady=3)
+
+        Label(form, text="Interval Minutes:", width=16, anchor="w").grid(row=5, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.minutes_var, width=42).grid(row=5, column=1, sticky="ew", pady=3)
+
+        Checkbutton(form, text="Enabled", variable=self.enabled_var).grid(row=6, column=1, sticky="w", pady=3)
+
+        self.info = Text(right, wrap="word", height=10)
+        self.info.pack(fill=BOTH, expand=True, pady=(12, 0))
+
+        form.columnconfigure(1, weight=1)
+
+        self.snapshot = []
+        self.listbox.bind("<<ListboxSelect>>", self.on_select)
+        self.category_var.trace_add("write", self.refresh_command_menu)
+
+        self.refresh_category_menu()
+        self.refresh()
+
+    def get_schedules(self):
+        return self.app.get_schedules()
+
+    def refresh_category_menu(self):
+        categories = getattr(self.app.cfg, "Categories", {})
+        names = sorted(categories.keys())
+
+        menu = self.category_menu["menu"]
+        menu.delete(0, "end")
+
+        for name in names:
+            menu.add_command(label=name, command=lambda value=name: self.category_var.set(value))
+
+        if names and self.category_var.get() not in names:
+            self.category_var.set(names[0])
+        elif not names:
+            self.category_var.set("")
+
+        self.refresh_command_menu()
+
+    def refresh_command_menu(self, *_args):
+        categories = getattr(self.app.cfg, "Categories", {})
+        category = self.category_var.get()
+        commands = categories.get(category, {})
+        names = sorted(commands.keys()) if isinstance(commands, dict) else []
+
+        menu = self.command_menu["menu"]
+        menu.delete(0, "end")
+
+        for name in names:
+            menu.add_command(label=name, command=lambda value=name: self.command_var.set(value))
+
+        if names and self.command_var.get() not in names:
+            self.command_var.set(names[0])
+        elif not names:
+            self.command_var.set("")
+
+    def refresh(self):
+        self.listbox.delete(0, END)
+        self.snapshot = []
+
+        for idx, schedule in enumerate(self.get_schedules()):
+            name = schedule.get("name", f"Schedule {idx + 1}")
+            category = schedule.get("category", "")
+            command = schedule.get("command", "")
+            schedule_type = schedule.get("type", "")
+            enabled = "ON" if schedule.get("enabled") else "OFF"
+
+            label = f"[{enabled}] {name} — {schedule_type} — {category}/{command}"
+            self.snapshot.append((idx, schedule))
+            self.listbox.insert(END, label)
+
+        self.info.delete("1.0", END)
+        self.info.insert("1.0", "Select a schedule or create a new one.")
+
+    def on_select(self, _event=None):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return
+
+        _idx, schedule = self.snapshot[idxs[0]]
+
+        self.name_var.set(schedule.get("name", ""))
+        self.category_var.set(schedule.get("category", ""))
+        self.refresh_command_menu()
+        self.command_var.set(schedule.get("command", ""))
+        self.type_var.set(schedule.get("type", "interval_minutes"))
+        self.time_var.set(schedule.get("time", ""))
+        self.minutes_var.set(str(schedule.get("minutes", "")))
+        self.enabled_var.set(1 if schedule.get("enabled") else 0)
+
+        self.info.delete("1.0", END)
+        self.info.insert("1.0", pprint.pformat(schedule, indent=4))
+
+    def clear_form(self):
+        self.name_var.set("")
+        self.type_var.set("interval_minutes")
+        self.time_var.set("")
+        self.minutes_var.set("1")
+        self.enabled_var.set(1)
+        self.refresh_category_menu()
+        self.listbox.selection_clear(0, END)
+
+    def build_schedule_from_form(self):
+        name = self.name_var.get().strip()
+        category = self.category_var.get().strip()
+        command = self.command_var.get().strip()
+        schedule_type = self.type_var.get().strip()
+
+        if not name:
+            raise ValueError("Schedule name is required.")
+        if not category or not command:
+            raise ValueError("Category and command are required.")
+        if schedule_type not in ("startup", "daily", "interval_minutes"):
+            raise ValueError("Schedule type must be startup, daily, or interval_minutes.")
+
+        schedule = {
+            "name": name,
+            "category": category,
+            "command": command,
+            "type": schedule_type,
+            "enabled": bool(self.enabled_var.get()),
+        }
+
+        if schedule_type == "daily":
+            time_value = self.time_var.get().strip()
+            if not re.match(r"^\d{2}:\d{2}$", time_value):
+                raise ValueError("Daily time must be HH:MM.")
+            schedule["time"] = time_value
+
+        if schedule_type == "interval_minutes":
+            try:
+                minutes = int(self.minutes_var.get().strip())
+            except Exception:
+                raise ValueError("Interval minutes must be a number.")
+            if minutes <= 0:
+                raise ValueError("Interval minutes must be greater than zero.")
+            schedule["minutes"] = minutes
+
+        return schedule
+
+    def selected_schedule_index(self):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return None
+        return self.snapshot[idxs[0]][0]
+
+    def save_schedule(self):
+        try:
+            schedule = self.build_schedule_from_form()
+        except Exception as exc:
+            self.app.show_traceback_window("Schedule Manager", str(exc))
+            return
+
+        schedules = self.get_schedules()
+        index = self.selected_schedule_index()
+
+        if index is None:
+            schedules.append(schedule)
+        else:
+            schedules[index] = schedule
+
+        self.app.persist_full_config()
+        self.app.set_status(f"Saved schedule {schedule['name']}")
+        self.refresh()
+
+    def delete_schedule(self):
+        index = self.selected_schedule_index()
+        if index is None:
+            self.app.show_traceback_window("Schedule Manager", "Select a schedule first.")
+            return
+
+        schedules = self.get_schedules()
+        schedule = schedules[index]
+
+        if not messagebox.askokcancel("Delete Schedule", f"Delete schedule '{schedule.get('name')}'?"):
+            return
+
+        del schedules[index]
+        self.app.persist_full_config()
+        self.clear_form()
+        self.refresh()
+
+    def toggle_enabled(self):
+        index = self.selected_schedule_index()
+        if index is None:
+            self.app.show_traceback_window("Schedule Manager", "Select a schedule first.")
+            return
+
+        schedules = self.get_schedules()
+        schedules[index]["enabled"] = not bool(schedules[index].get("enabled"))
+
+        self.app.persist_full_config()
+        self.refresh()
+
+    def run_now(self):
+        index = self.selected_schedule_index()
+        if index is None:
+            try:
+                schedule = self.build_schedule_from_form()
+            except Exception as exc:
+                self.app.show_traceback_window("Schedule Manager", str(exc))
+                return
+        else:
+            schedule = self.get_schedules()[index]
+
+        self.app.run_scheduled_command(schedule)
 
 class ChainRunnerWindow:
     def __init__(self, parent, total_steps: int):  # ✅
@@ -562,15 +848,15 @@ class HotkeyEditorWindow:
         command = self.command_var.get().strip()
 
         if not hotkey or not category or not command:
-            self.show_traceback_window("Hotkey Editor", "Hotkey, category, and command are all required.")
+            self.app.show_traceback_window("Hotkey Editor", "Hotkey, category, and command are all required.")
             return
 
         categories = getattr(self.app.cfg, "Categories", {})
         if category not in categories:
-            self.show_traceback_window("Hotkey Editor", f"Unknown category: {category}")
+            self.app.show_traceback_window("Hotkey Editor", f"Unknown category: {category}")
             return
         if command not in categories[category]:
-            self.show_traceback_window("Hotkey Editor", f"Unknown command in {category}: {command}")
+            self.app.show_traceback_window("Hotkey Editor", f"Unknown command in {category}: {command}")
             return
 
         hotkeys = self.app.get_hotkeys_dict()
@@ -583,12 +869,12 @@ class HotkeyEditorWindow:
     def delete_mapping(self):
         hotkey = self.hotkey_var.get().strip()
         if not hotkey:
-            self.show_traceback_window("Hotkey Editor", "Enter or select a hotkey to delete.")
+            self.app.show_traceback_window("Hotkey Editor", "Enter or select a hotkey to delete.")
             return
 
         hotkeys = self.app.get_hotkeys_dict()
         if hotkey not in hotkeys:
-            self.show_traceback_window("Hotkey Editor", f"Hotkey not found: {hotkey}")
+            self.app.show_traceback_window("Hotkey Editor", f"Hotkey not found: {hotkey}")
             return
 
         del hotkeys[hotkey]
@@ -1123,7 +1409,7 @@ class ChainBuilderWindow:
 
     def save_steps_as_template(self):
         if not self.steps:
-            self.show_traceback_window("Chain Templates", "There are no steps to save.")
+            self.app.show_traceback_window("Chain Templates", "There are no steps to save.")
             return
 
         prompt = MultiFieldPrompt(
@@ -1139,7 +1425,7 @@ class ChainBuilderWindow:
 
         name = values.get("template_name", "").strip()
         if not name:
-            self.show_traceback_window("Chain Templates", "Template name is required.")
+            self.app.show_traceback_window("Chain Templates", "Template name is required.")
             return
 
         templates = self.app.get_chain_templates()
@@ -1160,7 +1446,7 @@ class ChainBuilderWindow:
     def choose_chain_template(self):
         templates = self.app.get_chain_templates()
         if not templates:
-            self.show_traceback_window("Chain Templates", "No chain templates have been saved yet.")
+            self.app.show_traceback_window("Chain Templates", "No chain templates have been saved yet.")
             return None
 
         names = sorted(templates.keys())
@@ -1180,7 +1466,7 @@ class ChainBuilderWindow:
         name = values.get("template_name", "").strip()
         if name not in templates:
             available = "\n".join(names)
-            self.show_traceback_window(
+            self.app.show_traceback_window(
                 "Chain Templates",
                 f"Unknown template: {name}\n\nAvailable templates:\n{available}"
             )
@@ -1247,7 +1533,7 @@ class ChainBuilderWindow:
         try:
             step = self.parse_current_step()
         except Exception as exc:
-            self.show_traceback_window("Chain Builder", str(exc))
+            self.app.show_traceback_window("Chain Builder", str(exc))
             return
 
         idxs = self.listbox.curselection()
@@ -1271,7 +1557,7 @@ class ChainBuilderWindow:
     def apply_to_editor_now(self):
         errors = self.validate_chain()
         if errors:
-            self.show_traceback_window("Validate Chain", "\n".join(errors))
+            self.app.show_traceback_window("Validate Chain", "\n".join(errors))
             return
 
         self.result = list(self.steps)
@@ -1334,7 +1620,7 @@ class ChainBuilderWindow:
         errors = self.validate_chain()
 
         if errors:
-            self.show_traceback_window("Validate Chain", "\n".join(errors))
+            self.app.show_traceback_window("Validate Chain", "\n".join(errors))
             return False
 
         messagebox.showinfo("Validate Chain", "Chain looks valid.")
@@ -1345,7 +1631,7 @@ class ChainBuilderWindow:
         index = self.get_selected_step_index()
 
         if index is None:
-            self.show_traceback_window("Run Selected Step", "Select a step first.")
+            self.app.show_traceback_window("Run Selected Step", "Select a step first.")
             return
 
         if index < 0 or index >= len(self.steps):
@@ -1357,7 +1643,7 @@ class ChainBuilderWindow:
             self.app.run_chain_step(step)
             self.app.set_status(f"Ran chain step #{index + 1}")
         except Exception as exc:
-            self.show_traceback_window(
+            self.app.show_traceback_window(
                 "Run Selected Step",
                 f"Could not run selected step:\n\n{exc}"
             )
@@ -1371,7 +1657,7 @@ class ChainBuilderWindow:
         index = self.get_selected_step_index()
 
         if index is None:
-            self.show_traceback_window("Run To End", "Select a step first.")
+            self.app.show_traceback_window("Run To End", "Select a step first.")
             return
 
         if index < 0 or index >= len(self.steps):
@@ -1390,7 +1676,7 @@ class ChainBuilderWindow:
                 break
 
         if failures:
-            self.show_traceback_window(
+            self.app.show_traceback_window(
                 "Run To End",
                 "\n".join(failures)
             )
@@ -1522,7 +1808,7 @@ class ChainBuilderWindow:
         try:
             step = self.parse_current_step()
         except Exception as exc:
-            self.show_traceback_window("Chain Builder", str(exc))
+            self.app.show_traceback_window("Chain Builder", str(exc))
             return
         idxs = self.listbox.curselection()
         if idxs:
@@ -1617,7 +1903,7 @@ class ChainBuilderWindow:
         errors = self.validate_chain()
 
         if errors:
-            self.show_traceback_window("Validate Chain", "\n".join(errors))
+            self.app.show_traceback_window("Validate Chain", "\n".join(errors))
             return False
 
         messagebox.showinfo("Validate Chain", "Chain looks valid.")
@@ -1796,7 +2082,7 @@ class CommandEditorWindow:
             try:
                 initial = json.loads(current)
             except Exception as exc:
-                self.show_traceback_window(
+                self.app.show_traceback_window(
                     "Chain Builder",
                     f"Could not parse current chain JSON:\n\n{exc}"
                 )
@@ -1898,7 +2184,7 @@ class CommandEditorWindow:
         try:
             category, name, entry = self._parse_form()
         except Exception as exc:
-            self.show_traceback_window("Command Editor", str(exc))
+            self.app.show_traceback_window("Command Editor", str(exc))
             return
 
         categories = getattr(self.app.cfg, "Categories", None)
@@ -1927,7 +2213,7 @@ class CommandEditorWindow:
         categories = getattr(self.app.cfg, "Categories", {})
 
         if category not in categories or name not in categories[category]:
-            self.show_traceback_window("Command Editor", "Selected command was not found.")
+            self.app.show_traceback_window("Command Editor", "Selected command was not found.")
             return
 
         del categories[category][name]
@@ -1949,7 +2235,7 @@ class CommandEditorWindow:
         categories = getattr(self.app.cfg, "Categories", {})
 
         if category not in categories or name not in categories[category]:
-            self.show_traceback_window(
+            self.app.show_traceback_window(
                 "Command Editor",
                 f"Command not found: {category}/{name}"
             )
@@ -2084,11 +2370,11 @@ class CategoryEditorWindow:
             return
         name = values.get("category_name", "").strip()
         if not name:
-            self.show_traceback_window("Category Editor", "Category name is required.")
+            self.app.show_traceback_window("Category Editor", "Category name is required.")
             return
         categories = self.get_categories()
         if name in categories:
-            self.show_traceback_window("Category Editor", f"Category already exists: {name}")
+            self.app.show_traceback_window("Category Editor", f"Category already exists: {name}")
             return
         categories[name] = {}
         self.app.persist_categories()
@@ -2099,7 +2385,7 @@ class CategoryEditorWindow:
     def rename_category(self):
         old_name = self.selected_category_name()
         if not old_name:
-            self.show_traceback_window("Category Editor", "Select a category to rename.")
+            self.app.show_traceback_window("Category Editor", "Select a category to rename.")
             return
         prompt = MultiFieldPrompt(
             self.window,
@@ -2113,11 +2399,11 @@ class CategoryEditorWindow:
             return
         new_name = values.get("new_name", "").strip()
         if not new_name:
-            self.show_traceback_window("Category Editor", "New category name is required.")
+            self.app.show_traceback_window("Category Editor", "New category name is required.")
             return
         categories = self.get_categories()
         if new_name != old_name and new_name in categories:
-            self.show_traceback_window("Category Editor", f"Category already exists: {new_name}")
+            self.app.show_traceback_window("Category Editor", f"Category already exists: {new_name}")
             return
         categories[new_name] = categories.pop(old_name)
         self.app.persist_categories()
@@ -2128,12 +2414,12 @@ class CategoryEditorWindow:
     def delete_category(self):
         name = self.selected_category_name()
         if not name:
-            self.show_traceback_window("Category Editor", "Select a category to delete.")
+            self.app.show_traceback_window("Category Editor", "Select a category to delete.")
             return
         categories = self.get_categories()
         commands = categories.get(name, {})
         if isinstance(commands, dict) and commands:
-            self.show_traceback_window(
+            self.app.show_traceback_window(
                 "Category Editor",
                 "Category is not empty. Delete or move its commands first.",
             )
@@ -2666,7 +2952,7 @@ class CommandPaletteWindow:
 
         new_name = values.get("new_name", "").strip()
         if not new_name:
-            self.show_traceback_window("Rename Command", "New command name is required.")
+            self.app.show_traceback_window("Rename Command", "New command name is required.")
             return "break"
 
         self.app.rename_command(category, old_name, new_name)
@@ -2743,7 +3029,7 @@ class TermForgeApp:
         )
 
         yscroll.pack(side=RIGHT, fill=Y)
-        xscroll.pack(side=BOTTOM, fill=X)
+        xscroll.pack(side="bottom", fill=X)
 
         text.insert(
             "1.0",
@@ -2809,7 +3095,7 @@ class TermForgeApp:
             if isinstance(history, list):
                 self.command_history = history[:MAX_HISTORY]
         except Exception as exc:
-            self.log(f"Could not load state file: {exc}")
+            self.show_traceback_windoow(f"Could not load state file: {exc}")
 
     def save_state(self) -> None:
         try:
@@ -2819,7 +3105,7 @@ class TermForgeApp:
             }
             STATE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except Exception as exc:
-            self.log(f"Could not save state file: {exc}")
+            self.show_traceback_windoow(f"Could not save state file: {exc}")
 
     def on_close(self) -> None:
         self.save_state()
@@ -3066,7 +3352,7 @@ class TermForgeApp:
                 text += f"\n\nWindows = {rendered}\n"
             CONFIG_FILE.write_text(text, encoding="utf-8")
         except Exception as exc:
-            self.log(f"Could not persist window profiles: {exc}")
+            self.show_traceback_window("Could not persist window profiles: ", exc)
 
 
     def get_hotkeys_dict(self) -> dict:
@@ -3092,7 +3378,7 @@ class TermForgeApp:
                 text += f"\n\nHotkeys = {rendered}\n"
             CONFIG_FILE.write_text(text, encoding="utf-8")
         except Exception as exc:
-            self.log(f"Could not persist hotkeys: {exc}")
+            selg.show_traceback_window("Could not persist hotkeys: ",exc)
 
     def open_hotkey_editor(self) -> None:
         HotkeyEditorWindow(self)
@@ -4194,7 +4480,8 @@ class TermForgeApp:
         CommandPaletteWindow(self)
         return "break"
 
-
+    def open_schedule_manager(self) -> None:
+        ScheduleManagerWindow(self)
 
     def bind_global_shortcuts(self) -> None:
         self.root.bind_all("<Control-p>", self.open_command_palette)
@@ -4381,6 +4668,8 @@ class TermForgeApp:
         tools_menu.add_separator()
         tools_menu.add_command(label="Hotkeys", command=self.show_hotkeys_help)
         tools_menu.add_command(label="Hotkey Editor", command=self.open_hotkey_editor)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Schedule Manager", command=self.open_schedule_manager)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         help_menu = Menu(menubar, tearoff=0)
