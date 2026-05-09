@@ -378,7 +378,19 @@ class ScheduleManagerWindow:
             schedule_type = schedule.get("type", "")
             enabled = "ON" if schedule.get("enabled") else "OFF"
 
-            label = f"[{enabled}] {name} — {schedule_type} — {category}/{command}"
+            last_status = schedule.get("_last_status", "never")
+            last_run = schedule.get("_last_run", "")
+            run_count = schedule.get("_run_count", 0)
+
+            status_text = last_status
+            if last_run:
+                status_text = f"{last_status} @ {last_run}"
+
+            label = (
+                f"[{enabled}] {name} — {schedule_type} — "
+                f"{category}/{command} — {status_text} — runs:{run_count}"
+            )
+
             self.snapshot.append((idx, schedule))
             self.listbox.insert(END, label)
 
@@ -390,11 +402,17 @@ class ScheduleManagerWindow:
         if not idxs:
             return
 
-        _idx, schedule = self.snapshot[idxs[0]]
+        index = idxs[0]
+        if index < 0 or index >= len(self.snapshot):
+            return
+
+        _schedule_index, schedule = self.snapshot[index]
 
         self.name_var.set(schedule.get("name", ""))
+
         self.category_var.set(schedule.get("category", ""))
         self.refresh_command_menu()
+
         self.command_var.set(schedule.get("command", ""))
         self.type_var.set(schedule.get("type", "interval_minutes"))
         self.time_var.set(schedule.get("time", ""))
@@ -3121,17 +3139,44 @@ class TermForgeApp:
             self.root.destroy()
 
     def run_scheduled_command(self, schedule: dict) -> None:
+        from datetime import datetime
+
         category = schedule.get("category")
         command = schedule.get("command")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        schedule["_last_run"] = now
+        schedule["_run_count"] = int(schedule.get("_run_count", 0) or 0) + 1
 
         categories = getattr(self.cfg, "Categories", {})
 
-        if category not in categories or command not in categories[category]:
-            self.log(f"Scheduled command not found: {category}/{command}")
-            return
+        try:
+            if category not in categories:
+                raise TermForgeError(f"Scheduled category not found: {category}")
 
-        self.set_status(f"Running scheduled command: {category}/{command}")
-        self.select_cmd(None, category, command)
+            if command not in categories[category]:
+                raise TermForgeError(f"Scheduled command not found: {category}/{command}")
+
+            self.set_status(f"Running scheduled command: {category}/{command}")
+            self.select_cmd(None, category, command)
+
+            schedule["_last_status"] = "success"
+            schedule["_last_error"] = ""
+
+        except Exception as exc:
+            schedule["_last_status"] = "failed"
+            schedule["_last_error"] = str(exc)
+
+            try:
+                self.show_traceback_window(
+                    f"Scheduled Command Failed: {category}/{command}",
+                    exc,
+                )
+            except Exception:
+                pass
+
+        finally:
+            self.persist_full_config()
 
     def get_chain_runner(self, total_steps: int):
         runner = getattr(self, "chain_runner_window", None)
