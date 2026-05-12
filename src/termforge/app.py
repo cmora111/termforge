@@ -102,8 +102,11 @@ def ensure_user_config() -> None:
         "Schedules = []",
         "ScheduleHistory = []",
         "SchedulerPaused = False",
+        "BackupDir = str(CONFIG_DIR / 'backups')",
         "",
     ]
+    backup_dir = Path(getattr(cfg, "BackupDir", CONFIG_DIR / "backups"))
+    backup_dir.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
 
 def parse_command_entry(entry):
@@ -2933,6 +2936,7 @@ class TermForgeApp:
         self.hotkeys_enabled = False
         self.hotkey_status = "Hotkeys not initialized."
         self.set_status("Scheduler: PAUSED" if self.is_scheduler_paused() else "Scheduler: ACTIVE")
+        self._last_backup_time = 0
 
         if self.debug:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -3119,6 +3123,95 @@ class TermForgeApp:
             self.root.quit()
         finally:
             self.root.destroy()
+
+    def export_full_config(self, target: str | None = None) -> str:
+        from datetime import datetime
+
+        config_path = Path(self.cfg.__file__)
+
+        if target is None:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+            target = filedialog.asksaveasfilename(
+                title="Export TermForge Configuration",
+                defaultextension=".py",
+                initialfile=f"termforge_backup_{timestamp}.py",
+                filetypes=[
+                    ("Python files", "*.py"),
+                    ("All files", "*.*"),
+                ],
+            )
+
+            if not target:
+                return ""
+
+        shutil.copy2(config_path, target)
+
+        self.set_status(f"Exported configuration to {target}")
+        self.log(f"Exported configuration: {target}")
+
+        return target
+
+    def import_full_config(self) -> None:
+        source = filedialog.askopenfilename(
+            title="Import TermForge Configuration",
+            filetypes=[
+                ("Python files", "*.py"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if not source:
+            return
+
+        if not messagebox.askokcancel(
+            "Import Configuration",
+            "Importing will overwrite the current configuration.\n\nContinue?",
+        ):
+            return
+
+        config_path = Path(self.cfg.__file__)
+
+        self.create_automatic_backup()
+
+        shutil.copy2(source, config_path)
+
+        messagebox.showinfo(
+            "Import Complete",
+            "Configuration imported.\n\nRestart TermForge to reload it.",
+        )
+
+        self.log(f"Imported configuration: {source}")
+
+    def create_automatic_backup(self) -> str:
+        from datetime import datetime
+
+        backup_dir = Path(
+            getattr(self.cfg, "BackupDir", CONFIG_DIR / "backups")
+        )
+
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+        target = backup_dir / f"termforge_auto_backup_{timestamp}.py"
+
+        shutil.copy2(self.cfg.__file__, target)
+
+        self.log(f"Created automatic backup: {target}")
+
+        backups = sorted(
+            backup_dir.glob("termforge_auto_backup_*.py"),
+            reverse=True,
+        )
+
+        for old in backups[25:]:
+            try:
+                old.unlink()
+            except Exception:
+                pass
+
+        return str(target)
 
     def is_scheduler_paused(self) -> bool:
         return bool(getattr(self.cfg, "SchedulerPaused", False))
@@ -4505,6 +4598,16 @@ class TermForgeApp:
 
 
     def persist_full_config(self) -> None:
+        import time
+
+        now = time.time()
+
+        if now - getattr(self, "_last_backup_time", 0) > 900:
+            try:
+                self.create_automatic_backup()
+                self._last_backup_time = now
+            except Exception:
+                pass
         try:
             terminal = getattr(self.cfg, "terminal", {"application": "gnome-terminal"})
             debug = getattr(self.cfg, "debug", {"Flag": False})
@@ -4644,8 +4747,14 @@ class TermForgeApp:
         menubar = Menu(self.root)
 
         file_menu = Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Export Config Backup", command=self.export_config_backup)
-        file_menu.add_command(label="Import Config Backup", command=self.import_config_backup)
+        file_menu.add_command(
+            label="Export Full Configuration",
+            command=self.export_full_config,
+        )
+        file_menu.add_command(
+            label="Import Full Configuration",
+            command=self.import_full_config,
+        )
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_close)
         menubar.add_cascade(label="File", menu=file_menu)
