@@ -3124,33 +3124,60 @@ class TermForgeApp:
         finally:
             self.root.destroy()
 
-    def export_full_config(self, target: str | None = None) -> str:
-        from datetime import datetime
+    def get_config_path(self) -> Path:
+        return CONFIG_FILE
 
-        config_path = Path(self.cfg.__file__)
 
-        if target is None:
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    def get_backup_dir(self) -> Path:
+        backup_dir = Path(getattr(self.cfg, "BackupDir", CONFIG_DIR / "backups"))
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        return backup_dir
 
-            target = filedialog.asksaveasfilename(
-                title="Export TermForge Configuration",
-                defaultextension=".py",
-                initialfile=f"termforge_backup_{timestamp}.py",
-                filetypes=[
-                    ("Python files", "*.py"),
-                    ("All files", "*.*"),
-                ],
-            )
 
-            if not target:
-                return ""
+    def create_automatic_backup(self) -> str:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        backup_dir = self.get_backup_dir()
+        target = backup_dir / f"termforge_auto_backup_{timestamp}.py"
 
-        shutil.copy2(config_path, target)
+        if CONFIG_FILE.exists():
+            shutil.copy2(CONFIG_FILE, target)
+
+        backups = sorted(
+            backup_dir.glob("termforge_auto_backup_*.py"),
+            reverse=True,
+        )
+
+        for old in backups[25:]:
+            try:
+                old.unlink()
+            except Exception:
+                pass
+
+        self.log(f"Created automatic backup: {target}")
+        return str(target)
+
+
+    def export_full_config(self) -> None:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+        target = filedialog.asksaveasfilename(
+            title="Export TermForge Configuration",
+            defaultextension=".py",
+            initialfile=f"termforge_backup_{timestamp}.py",
+            filetypes=[
+                ("Python files", "*.py"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if not target:
+            return
+
+        shutil.copy2(CONFIG_FILE, target)
 
         self.set_status(f"Exported configuration to {target}")
-        self.log(f"Exported configuration: {target}")
+        messagebox.showinfo("Export Configuration", f"Exported to:\n\n{target}")
 
-        return target
 
     def import_full_config(self) -> None:
         source = filedialog.askopenfilename(
@@ -3166,52 +3193,22 @@ class TermForgeApp:
 
         if not messagebox.askokcancel(
             "Import Configuration",
-            "Importing will overwrite the current configuration.\n\nContinue?",
+            "Importing will replace your current TermForge configuration.\n\nContinue?",
         ):
             return
 
-        config_path = Path(self.cfg.__file__)
-
-        self.create_automatic_backup()
-
-        shutil.copy2(source, config_path)
+        backup = self.create_automatic_backup()
+        shutil.copy2(source, CONFIG_FILE)
 
         messagebox.showinfo(
             "Import Complete",
-            "Configuration imported.\n\nRestart TermForge to reload it.",
+            "Configuration imported successfully.\n\n"
+            f"Previous config backup:\n{backup}\n\n"
+            "Restart TermForge to fully reload the imported configuration.",
         )
 
-        self.log(f"Imported configuration: {source}")
+        self.set_status("Imported configuration. Restart recommended.")
 
-    def create_automatic_backup(self) -> str:
-        from datetime import datetime
-
-        backup_dir = Path(
-            getattr(self.cfg, "BackupDir", CONFIG_DIR / "backups")
-        )
-
-        backup_dir.mkdir(parents=True, exist_ok=True)
-
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-
-        target = backup_dir / f"termforge_auto_backup_{timestamp}.py"
-
-        shutil.copy2(self.cfg.__file__, target)
-
-        self.log(f"Created automatic backup: {target}")
-
-        backups = sorted(
-            backup_dir.glob("termforge_auto_backup_*.py"),
-            reverse=True,
-        )
-
-        for old in backups[25:]:
-            try:
-                old.unlink()
-            except Exception:
-                pass
-
-        return str(target)
 
     def is_scheduler_paused(self) -> bool:
         return bool(getattr(self.cfg, "SchedulerPaused", False))
