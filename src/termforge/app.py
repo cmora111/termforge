@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import importlib.util
 import json
 import logging
@@ -29,19 +28,18 @@ from tkinter import (
     Checkbutton,
     Entry,
     Frame,
+    IntVar,
     Label,
     Listbox,
     Menu,
     OptionMenu,
-    IntVar,
     Scrollbar,
     StringVar,
-    filedialog,
     Text,
     Tk,
     Toplevel,
-    messagebox,
     filedialog,
+    messagebox,
 )
 
 APP_NAME = "TermForge"
@@ -102,59 +100,11 @@ def ensure_user_config() -> None:
         "ChainTemplates = {}",
         "Tags = {}",
         "Schedules = []",
+        "ScheduleHistory = []",
+        "SchedulerPaused = False",
         "",
     ]
     CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
-
-def start_scheduler(self) -> None:
-    self.run_startup_schedules()
-    self.root.after(30_000, self.scheduler_tick)
-
-
-def get_schedules(self) -> list:
-    schedules = getattr(self.cfg, "Schedules", [])
-    if not isinstance(schedules, list):
-        schedules = []
-        setattr(self.cfg, "Schedules", schedules)
-    return schedules
-
-
-def run_startup_schedules(self) -> None:
-    for schedule in self.get_schedules():
-        if schedule.get("enabled") and schedule.get("type") == "startup":
-            self.run_scheduled_command(schedule)
-
-
-def scheduler_tick(self) -> None:
-    from datetime import datetime
-
-    now = datetime.now()
-    now_hhmm = now.strftime("%H:%M")
-
-    for schedule in self.get_schedules():
-        if not schedule.get("enabled"):
-            continue
-
-        schedule_type = schedule.get("type")
-
-        if schedule_type == "daily":
-            if schedule.get("time") == now_hhmm:
-                last_run_key = now.strftime("%Y-%m-%d %H:%M")
-                if schedule.get("_last_run") != last_run_key:
-                    schedule["_last_run"] = last_run_key
-                    self.run_scheduled_command(schedule)
-
-        elif schedule_type == "interval_minutes":
-            minutes = int(schedule.get("minutes", 0) or 0)
-            if minutes > 0:
-                last = schedule.get("_last_tick")
-                current_tick = int(now.timestamp() // (minutes * 60))
-                if last != current_tick:
-                    schedule["_last_tick"] = current_tick
-                    self.run_scheduled_command(schedule)
-
-    self.persist_full_config()
-    self.root.after(30_000, self.scheduler_tick)
 
 def parse_command_entry(entry):
     if isinstance(entry, (list, tuple)):
@@ -234,315 +184,12 @@ class MultiFieldPrompt:
         return self.result
 
 
-class ScheduleManagerWindow:
-    def __init__(self, app):
-        self.app = app
-        self.window = Toplevel(app.root)
-        self.window.title("Schedule Manager")
-        self.window.geometry("980x560")
-        self.window.transient(app.root)
-
-        outer = Frame(self.window, padx=8, pady=8)
-        outer.pack(fill=BOTH, expand=True)
-
-        Label(
-            outer,
-            text="Schedule Manager",
-            bd=4,
-            width=32,
-            bg="lightgreen",
-            fg="black",
-            relief="raised",
-        ).pack(pady=(0, 8))
-
-        action_row = Frame(outer)
-        action_row.pack(fill=X, pady=(0, 8))
-
-        Button(action_row, text="Save", width=14, bg="darkgreen", fg="white", command=self.save_schedule).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="New / Clear", width=14, bg="#555555", fg="white", command=self.clear_form).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Delete", width=14, bg="#7f6000", fg="white", command=self.delete_schedule).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Enable/Disable", width=16, bg="#2f5597", fg="white", command=self.toggle_enabled).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Run Now", width=14, bg="#3d6d3d", fg="white", command=self.run_now).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
-
-        body = Frame(outer)
-        body.pack(fill=BOTH, expand=True)
-
-        left = Frame(body)
-        left.pack(side=LEFT, fill=Y)
-
-        right = Frame(body)
-        right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
-
-        self.listbox = Listbox(left, width=42, height=22)
-        self.listbox.pack(side=LEFT, fill=Y)
-
-        scrollbar = Scrollbar(left, command=self.listbox.yview)
-        scrollbar.pack(side=RIGHT, fill=Y)
-        self.listbox.config(yscrollcommand=scrollbar.set)
-
-        form = Frame(right)
-        form.pack(fill=X)
-
-        self.name_var = StringVar()
-        self.category_var = StringVar()
-        self.command_var = StringVar()
-        self.type_var = StringVar(value="interval_minutes")
-        self.time_var = StringVar()
-        self.minutes_var = StringVar(value="1")
-        self.enabled_var = IntVar(value=1)
-
-        Label(form, text="Name:", width=16, anchor="w").grid(row=0, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.name_var, width=42).grid(row=0, column=1, sticky="ew", pady=3)
-
-        Label(form, text="Category:", width=16, anchor="w").grid(row=1, column=0, sticky="w", pady=3)
-        self.category_menu = OptionMenu(form, self.category_var, "")
-        self.category_menu.config(width=38)
-        self.category_menu.grid(row=1, column=1, sticky="w", pady=3)
-
-        Label(form, text="Command:", width=16, anchor="w").grid(row=2, column=0, sticky="w", pady=3)
-        self.command_menu = OptionMenu(form, self.command_var, "")
-        self.command_menu.config(width=38)
-        self.command_menu.grid(row=2, column=1, sticky="w", pady=3)
-
-        Label(form, text="Type:", width=16, anchor="w").grid(row=3, column=0, sticky="w", pady=3)
-        self.type_menu = OptionMenu(form, self.type_var, "startup", "daily", "interval_minutes")
-        self.type_menu.config(width=38)
-        self.type_menu.grid(row=3, column=1, sticky="w", pady=3)
-
-        Label(form, text="Daily Time HH:MM:", width=16, anchor="w").grid(row=4, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.time_var, width=42).grid(row=4, column=1, sticky="ew", pady=3)
-
-        Label(form, text="Interval Minutes:", width=16, anchor="w").grid(row=5, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.minutes_var, width=42).grid(row=5, column=1, sticky="ew", pady=3)
-
-        Checkbutton(form, text="Enabled", variable=self.enabled_var).grid(row=6, column=1, sticky="w", pady=3)
-
-        self.info = Text(right, wrap="word", height=10)
-        self.info.pack(fill=BOTH, expand=True, pady=(12, 0))
-
-        form.columnconfigure(1, weight=1)
-
-        self.snapshot = []
-        self.listbox.bind("<<ListboxSelect>>", self.on_select)
-        self.category_var.trace_add("write", self.refresh_command_menu)
-
-        self.refresh_category_menu()
-        self.refresh()
-
-    def get_schedules(self):
-        return self.app.get_schedules()
-
-    def refresh_category_menu(self):
-        categories = getattr(self.app.cfg, "Categories", {})
-        names = sorted(categories.keys())
-
-        menu = self.category_menu["menu"]
-        menu.delete(0, "end")
-
-        for name in names:
-            menu.add_command(label=name, command=lambda value=name: self.category_var.set(value))
-
-        if names and self.category_var.get() not in names:
-            self.category_var.set(names[0])
-        elif not names:
-            self.category_var.set("")
-
-        self.refresh_command_menu()
-
-    def refresh_command_menu(self, *_args):
-        categories = getattr(self.app.cfg, "Categories", {})
-        category = self.category_var.get()
-        commands = categories.get(category, {})
-        names = sorted(commands.keys()) if isinstance(commands, dict) else []
-
-        menu = self.command_menu["menu"]
-        menu.delete(0, "end")
-
-        for name in names:
-            menu.add_command(label=name, command=lambda value=name: self.command_var.set(value))
-
-        if names and self.command_var.get() not in names:
-            self.command_var.set(names[0])
-        elif not names:
-            self.command_var.set("")
-
-    def refresh(self):
-        self.listbox.delete(0, END)
-        self.snapshot = []
-
-        for idx, schedule in enumerate(self.get_schedules()):
-            name = schedule.get("name", f"Schedule {idx + 1}")
-            category = schedule.get("category", "")
-            command = schedule.get("command", "")
-            schedule_type = schedule.get("type", "")
-            enabled = "ON" if schedule.get("enabled") else "OFF"
-
-            last_status = schedule.get("_last_status", "never")
-            last_run = schedule.get("_last_run", "")
-            run_count = schedule.get("_run_count", 0)
-
-            status_text = last_status
-            if last_run:
-                status_text = f"{last_status} @ {last_run}"
-
-            label = (
-                f"[{enabled}] {name} — {schedule_type} — "
-                f"{category}/{command} — {status_text} — runs:{run_count}"
-            )
-
-            self.snapshot.append((idx, schedule))
-            self.listbox.insert(END, label)
-
-        self.info.delete("1.0", END)
-        self.info.insert("1.0", "Select a schedule or create a new one.")
-
-    def on_select(self, _event=None):
-        idxs = self.listbox.curselection()
-        if not idxs:
-            return
-
-        index = idxs[0]
-        if index < 0 or index >= len(self.snapshot):
-            return
-
-        _schedule_index, schedule = self.snapshot[index]
-
-        self.name_var.set(schedule.get("name", ""))
-
-        self.category_var.set(schedule.get("category", ""))
-        self.refresh_command_menu()
-
-        self.command_var.set(schedule.get("command", ""))
-        self.type_var.set(schedule.get("type", "interval_minutes"))
-        self.time_var.set(schedule.get("time", ""))
-        self.minutes_var.set(str(schedule.get("minutes", "")))
-        self.enabled_var.set(1 if schedule.get("enabled") else 0)
-
-        self.info.delete("1.0", END)
-        self.info.insert("1.0", pprint.pformat(schedule, indent=4))
-
-    def clear_form(self):
-        self.name_var.set("")
-        self.type_var.set("interval_minutes")
-        self.time_var.set("")
-        self.minutes_var.set("1")
-        self.enabled_var.set(1)
-        self.refresh_category_menu()
-        self.listbox.selection_clear(0, END)
-
-    def build_schedule_from_form(self):
-        name = self.name_var.get().strip()
-        category = self.category_var.get().strip()
-        command = self.command_var.get().strip()
-        schedule_type = self.type_var.get().strip()
-
-        if not name:
-            raise ValueError("Schedule name is required.")
-        if not category or not command:
-            raise ValueError("Category and command are required.")
-        if schedule_type not in ("startup", "daily", "interval_minutes"):
-            raise ValueError("Schedule type must be startup, daily, or interval_minutes.")
-
-        schedule = {
-            "name": name,
-            "category": category,
-            "command": command,
-            "type": schedule_type,
-            "enabled": bool(self.enabled_var.get()),
-        }
-
-        if schedule_type == "daily":
-            time_value = self.time_var.get().strip()
-            if not re.match(r"^\d{2}:\d{2}$", time_value):
-                raise ValueError("Daily time must be HH:MM.")
-            schedule["time"] = time_value
-
-        if schedule_type == "interval_minutes":
-            try:
-                minutes = int(self.minutes_var.get().strip())
-            except Exception:
-                raise ValueError("Interval minutes must be a number.")
-            if minutes <= 0:
-                raise ValueError("Interval minutes must be greater than zero.")
-            schedule["minutes"] = minutes
-
-        return schedule
-
-    def selected_schedule_index(self):
-        idxs = self.listbox.curselection()
-        if not idxs:
-            return None
-        return self.snapshot[idxs[0]][0]
-
-    def save_schedule(self):
-        try:
-            schedule = self.build_schedule_from_form()
-        except Exception as exc:
-            self.app.show_traceback_window("Schedule Manager", str(exc))
-            return
-
-        schedules = self.get_schedules()
-        index = self.selected_schedule_index()
-
-        if index is None:
-            schedules.append(schedule)
-        else:
-            schedules[index] = schedule
-
-        self.app.persist_full_config()
-        self.app.set_status(f"Saved schedule {schedule['name']}")
-        self.refresh()
-
-    def delete_schedule(self):
-        index = self.selected_schedule_index()
-        if index is None:
-            self.app.show_traceback_window("Schedule Manager", "Select a schedule first.")
-            return
-
-        schedules = self.get_schedules()
-        schedule = schedules[index]
-
-        if not messagebox.askokcancel("Delete Schedule", f"Delete schedule '{schedule.get('name')}'?"):
-            return
-
-        del schedules[index]
-        self.app.persist_full_config()
-        self.clear_form()
-        self.refresh()
-
-    def toggle_enabled(self):
-        index = self.selected_schedule_index()
-        if index is None:
-            self.app.show_traceback_window("Schedule Manager", "Select a schedule first.")
-            return
-
-        schedules = self.get_schedules()
-        schedules[index]["enabled"] = not bool(schedules[index].get("enabled"))
-
-        self.app.persist_full_config()
-        self.refresh()
-
-    def run_now(self):
-        index = self.selected_schedule_index()
-        if index is None:
-            try:
-                schedule = self.build_schedule_from_form()
-            except Exception as exc:
-                self.app.show_traceback_window("Schedule Manager", str(exc))
-                return
-        else:
-            schedule = self.get_schedules()[index]
-
-        self.app.run_scheduled_command(schedule)
-
 class ChainRunnerWindow:
-    def __init__(self, parent, total_steps: int):  # ✅
+    def __init__(self, parent, total_steps: int):
         self.window = Toplevel(parent)
         self.window.title("Chain Runner")
         self.window.geometry("820x500")
         self.window.transient(parent)
-        self.last_run_start_index = "1.0"
 
         outer = Frame(self.window, padx=8, pady=8)
         outer.pack(fill=BOTH, expand=True)
@@ -562,159 +209,19 @@ class ChainRunnerWindow:
         self.output = Text(outer, wrap="word", height=12, width=90)
         self.output.pack(fill=BOTH, expand=True, pady=(0, 8))
 
+        self.last_run_start_index = self.output.index("end-1c")
+        self.log("──", f"New chain run — {total_steps} step(s)")
+
         button_row = Frame(outer)
         button_row.pack(fill=X, side="bottom", pady=(8, 0))
 
-        self.header_var = StringVar(value=f"Chain Runner — {total_steps} step(s)")
+        Button(button_row, text="Copy Log", width=14, bg="#2f5597", fg="white", command=self.copy_log).pack(side=LEFT, padx=(0, 6))
+        Button(button_row, text="Copy Last Run", width=16, bg="#4b4b88", fg="white", command=self.copy_last_run).pack(side=LEFT, padx=(0, 6))
+        Button(button_row, text="Save Log", width=14, bg="#3d6d3d", fg="white", command=self.save_log).pack(side=LEFT, padx=(0, 6))
+        Button(button_row, text="Clear Log", width=14, bg="#7f6000", fg="white", command=self.clear_log).pack(side=LEFT, padx=(0, 6))
+        Button(button_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
 
-        Label(
-            outer,
-            textvariable=self.header_var,
-        )
-
-        button_row = Frame(outer)
-
-        Button(
-            button_row,
-            text="Copy Log",
-            width=14,
-            bg="#2f5597",
-            fg="white",
-            command=self.copy_log,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            button_row,
-            text="Copy Last Run",
-            width=16,
-            bg="#4b4b88",
-            fg="white",
-            command=self.copy_last_run,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            button_row,
-            text="Save Log",
-            width=14,
-            bg="#3d6d3d",
-            fg="white",
-            command=self.save_log,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            button_row,
-            text="Clear Log",
-            width=14,
-            bg="#7f6000",
-            fg="white",
-            command=self.clear_log,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            button_row,
-            text="Close",
-            width=14,
-            bg="red",
-            fg="black",
-            command=self.window.destroy,
-        ).pack(side=RIGHT)
-        button_row.pack(fill=X, side="bottom", pady=(8, 0))
-
-    def reset_for_run(self, total_steps: int) -> None:
-        try:
-            self.window.deiconify()
-            self.window.lift()
-            self.header_var.set(f"Chain Runner — {total_steps} step(s)")
-
-            self.log("", "")
-
-            # mark start of newest run
-            self.last_run_start_index = self.output.index("end-1c")
-
-            self.log("──", f"New chain run — {total_steps} step(s)")
-        except Exception:
-            pass
-
-    def get_log_text(self) -> str:
-        return self.output.get("1.0", "end-1c").strip()
-
-    def get_last_run_text(self) -> str:
-        text = self.get_log_text()
-        marker = "── New chain run"
-
-        pos = text.rfind(marker)
-        if pos == -1:
-            return text.strip()
-
-        return text[pos:].strip()
-
-    def copy_last_run(self) -> None:
-        text = self.get_last_run_text()
-
-        if not text:
-            messagebox.showinfo("Copy Last Run", "No recent chain run found.")
-            return
-
-        self.window.clipboard_clear()
-        self.window.clipboard_append(text)
-        self.window.update()
-
-        messagebox.showinfo(
-            "Copy Last Run",
-            "Last chain run copied to clipboard."
-        )
-
-    def log(self, marker: str, message: str) -> None:
-        if not hasattr(self, "output"):
-            return
-
-        timestamp = datetime.now().strftime("%H:%M:%S")
-
-        if marker:
-            line = f"[{timestamp}] {marker} {message}"
-        else:
-            line = f"[{timestamp}] {message}"
-
-        self.output.insert("end", line + "\n")
-        self.output.see("end")
-        self.output.update_idletasks()
-
-    def copy_log(self) -> None:
-        text = self.output.get("1.0", "end-1c").strip()
-
-        if not text:
-            messagebox.showinfo("Copy Log", "Log is empty.")
-            return
-
-        self.window.clipboard_clear()
-        self.window.clipboard_append(text)
-        self.window.update()
-        messagebox.showinfo("Copy Log", "Full chain log copied to clipboard.")
-
-
-    def save_log(self) -> None:
-        text = self.get_log_text()
-        if not text:
-            messagebox.showinfo("Save Log", "Log is empty.")
-            return
-
-        target = filedialog.asksaveasfilename(
-            title="Save Chain Execution Log",
-            defaultextension=".log",
-            initialfile="termforge_chain.log",
-            filetypes=[
-                ("Log files", "*.log"),
-                ("Text files", "*.txt"),
-                ("All files", "*.*"),
-            ],
-        )
-
-        if not target:
-            return
-
-        Path(target).write_text(text + "\n", encoding="utf-8")
-        messagebox.showinfo("Save Log", f"Saved chain log to:\n\n{target}")
-
+        self.log("──", f"New chain run — {total_steps} step(s)")
 
     def exists(self) -> bool:
         try:
@@ -722,19 +229,77 @@ class ChainRunnerWindow:
         except Exception:
             return False
 
-
     def reset_for_run(self, total_steps: int) -> None:
         try:
             self.window.deiconify()
             self.window.lift()
             self.header_var.set(f"Chain Runner — {total_steps} step(s)")
 
-            # 👇 ADD THIS LINE
-            self.log("", "")
-            self.log("──", f"New chain run — {total_steps} step(s)")
+            # Add spacing after previous run if log is not empty.
+            if self.output.get("1.0", "end-1c").strip():
+                self.output.insert("end", "\n")
 
+            # Mark the start of THIS run before writing its first line.
+            self.last_run_start_index = self.output.index("end-1c")
+
+            self.log("──", f"New chain run — {total_steps} step(s)")
         except Exception:
             pass
+
+    def log(self, marker: str, message: str) -> None:
+        if not hasattr(self, "output"):
+            return
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        line = f"[{timestamp}] {marker} {message}" if marker else f"[{timestamp}] {message}"
+        self.output.insert("end", line + "\n")
+        self.output.see("end")
+        self.output.update_idletasks()
+
+    def get_log_text(self) -> str:
+        return self.output.get("1.0", "end-1c").strip()
+
+    def get_last_run_text(self) -> str:
+        try:
+            return self.output.get(self.last_run_start_index, "end-1c").strip()
+        except Exception:
+            return ""
+
+    def copy_log(self) -> None:
+        text = self.get_log_text()
+        if not text:
+            messagebox.showinfo("Copy Log", "Log is empty.")
+            return
+        self.window.clipboard_clear()
+        self.window.clipboard_append(text)
+        self.window.update()
+        messagebox.showinfo("Copy Log", "Full chain log copied to clipboard.")
+
+    def copy_last_run(self) -> None:
+        text = self.get_last_run_text()
+        if not text:
+            messagebox.showinfo("Copy Last Run", "No recent chain run found.")
+            return
+        self.window.clipboard_clear()
+        self.window.clipboard_append(text)
+        self.window.update()
+        messagebox.showinfo("Copy Last Run", "Last chain run copied to clipboard.")
+        print("LAST RUN START:", self.last_run_start_index)
+
+    def save_log(self) -> None:
+        text = self.get_log_text()
+        if not text:
+            messagebox.showinfo("Save Log", "Log is empty.")
+            return
+        target = filedialog.asksaveasfilename(
+            title="Save Chain Execution Log",
+            defaultextension=".log",
+            initialfile="termforge_chain.log",
+            filetypes=[("Log files", "*.log"), ("Text files", "*.txt"), ("All files", "*.*")],
+        )
+        if not target:
+            return
+        Path(target).write_text(text + "\n", encoding="utf-8")
+        messagebox.showinfo("Save Log", f"Saved chain log to:\n\n{target}")
 
     def clear_log(self) -> None:
         self.output.delete("1.0", END)
@@ -750,7 +315,6 @@ class ChainRunnerWindow:
 
     def finished(self) -> None:
         self.log("[✓]", "Chain complete.")
-
 
 
 class HotkeyEditorWindow:
@@ -1587,62 +1151,8 @@ class ChainBuilderWindow:
 
         self.window.destroy()
 
-    def validate_chain(self) -> list[str]:
-        errors = []
-
-        if not self.steps:
-            errors.append("Chain has no steps.")
-            return errors
-
-        for index, step in enumerate(self.steps, start=1):
-            if not isinstance(step, (list, tuple)) or not step:
-                errors.append(f"Step {index}: invalid step format.")
-                continue
-
-            kind = step[0]
-
-            if kind == "vars":
-                if len(step) < 2 or not isinstance(step[1], list):
-                    errors.append(f"Step {index}: vars step must be ['vars', ['name1', 'name2']].")
-                else:
-                    for var_name in step[1]:
-                        if not isinstance(var_name, str) or not var_name.strip():
-                            errors.append(f"Step {index}: vars contains an invalid variable name.")
-
-            elif kind == "select_profile":
-                if len(step) < 2 or not str(step[1]).strip():
-                    errors.append(f"Step {index}: select_profile requires a profile name.")
-
-            elif kind == "sleep":
-                if len(step) < 2:
-                    errors.append(f"Step {index}: sleep requires seconds.")
-                else:
-                    try:
-                        seconds = float(step[1])
-                        if seconds < 0:
-                            errors.append(f"Step {index}: sleep seconds cannot be negative.")
-                    except Exception:
-                        errors.append(f"Step {index}: sleep value must be a number.")
-
-            elif kind in (1, 2, 3, "spawn", "send", "detached"):
-                if len(step) < 2 or not str(step[1]).strip():
-                    errors.append(f"Step {index}: command step requires command text.")
-
-            else:
-                errors.append(f"Step {index}: unknown step kind {kind!r}.")
-
-        return errors
 
 
-    def validate_chain_with_notice(self):
-        errors = self.validate_chain()
-
-        if errors:
-            self.app.show_traceback_window("Validate Chain", "\n".join(errors))
-            return False
-
-        messagebox.showinfo("Validate Chain", "Chain looks valid.")
-        return True
 
 
     def run_selected_step(self):
@@ -1690,7 +1200,7 @@ class ChainBuilderWindow:
                 self.app.run_chain_step(step)
                 self.app.set_status(f"Ran chain step #{i + 1}")
             except Exception as exc:
-                failures.append(f"Step {i + 1}: {exc}")
+                self.app.show_traceback_window(f"Step {i + 1}: ", str(exc))
                 break
 
         if failures:
@@ -2100,10 +1610,7 @@ class CommandEditorWindow:
             try:
                 initial = json.loads(current)
             except Exception as exc:
-                self.app.show_traceback_window(
-                    "Chain Builder",
-                    f"Could not parse current chain JSON:\n\n{exc}"
-                )
+                self.app.show_traceback_window(f"Chain Builder, Could not parse current chain JSON:\n\n", (exc))
                 return
 
         builder = ChainBuilderWindow(self.window, self.app, initial_steps=initial)
@@ -2979,6 +2486,431 @@ class CommandPaletteWindow:
 
         return "break"
 
+class ScheduleManagerWindow:
+    def __init__(self, app):
+        self.app = app
+        self.window = Toplevel(app.root)
+        self.window.title("Schedule Manager")
+        self.window.geometry("980x560")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Schedule Manager",
+            bd=4,
+            width=32,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(action_row, text="Save", width=14, bg="darkgreen", fg="white", command=self.save_schedule).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="New / Clear", width=14, bg="#555555", fg="white", command=self.clear_form).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Delete", width=14, bg="#7f6000", fg="white", command=self.delete_schedule).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Enable/Disable", width=16, bg="#2f5597", fg="white", command=self.toggle_enabled).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Run Now", width=14, bg="#3d6d3d", fg="white", command=self.run_now).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
+
+        body = Frame(outer)
+        body.pack(fill=BOTH, expand=True)
+
+        left = Frame(body)
+        left.pack(side=LEFT, fill=Y)
+
+        right = Frame(body)
+        right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
+
+        self.listbox = Listbox(left, width=42, height=22)
+        self.listbox.pack(side=LEFT, fill=Y)
+
+        scrollbar = Scrollbar(left, command=self.listbox.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self.listbox.config(yscrollcommand=scrollbar.set)
+
+        form = Frame(right)
+        form.pack(fill=X)
+
+        self.name_var = StringVar()
+        self.category_var = StringVar()
+        self.command_var = StringVar()
+        self.type_var = StringVar(value="interval_minutes")
+        self.time_var = StringVar()
+        self.minutes_var = StringVar(value="1")
+        self.enabled_var = IntVar(value=1)
+
+        Label(form, text="Name:", width=16, anchor="w").grid(row=0, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.name_var, width=42).grid(row=0, column=1, sticky="ew", pady=3)
+
+        Label(form, text="Category:", width=16, anchor="w").grid(row=1, column=0, sticky="w", pady=3)
+        self.category_menu = OptionMenu(form, self.category_var, "")
+        self.category_menu.config(width=38)
+        self.category_menu.grid(row=1, column=1, sticky="w", pady=3)
+
+        Label(form, text="Command:", width=16, anchor="w").grid(row=2, column=0, sticky="w", pady=3)
+        self.command_menu = OptionMenu(form, self.command_var, "")
+        self.command_menu.config(width=38)
+        self.command_menu.grid(row=2, column=1, sticky="w", pady=3)
+
+        Label(form, text="Type:", width=16, anchor="w").grid(row=3, column=0, sticky="w", pady=3)
+        self.type_menu = OptionMenu(form, self.type_var, "startup", "daily", "interval_minutes")
+        self.type_menu.config(width=38)
+        self.type_menu.grid(row=3, column=1, sticky="w", pady=3)
+
+        Label(form, text="Daily Time HH:MM:", width=16, anchor="w").grid(row=4, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.time_var, width=42).grid(row=4, column=1, sticky="ew", pady=3)
+
+        Label(form, text="Interval Minutes:", width=16, anchor="w").grid(row=5, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.minutes_var, width=42).grid(row=5, column=1, sticky="ew", pady=3)
+
+        Checkbutton(form, text="Enabled", variable=self.enabled_var).grid(row=6, column=1, sticky="w", pady=3)
+
+        self.info = Text(right, wrap="word", height=10)
+        self.info.pack(fill=BOTH, expand=True, pady=(12, 0))
+
+        form.columnconfigure(1, weight=1)
+
+        self.snapshot = []
+        self.listbox.bind("<<ListboxSelect>>", self.on_select)
+        self.category_var.trace_add("write", self.refresh_command_menu)
+
+        self.refresh_category_menu()
+        self.refresh()
+
+    def get_schedules(self):
+        return self.app.get_schedules()
+
+    def refresh_category_menu(self):
+        categories = getattr(self.app.cfg, "Categories", {})
+        names = sorted(categories.keys())
+
+        menu = self.category_menu["menu"]
+        menu.delete(0, "end")
+
+        for name in names:
+            menu.add_command(label=name, command=lambda value=name: self.category_var.set(value))
+
+        if names and self.category_var.get() not in names:
+            self.category_var.set(names[0])
+        elif not names:
+            self.category_var.set("")
+
+        self.refresh_command_menu()
+
+    def refresh_command_menu(self, *_args):
+        categories = getattr(self.app.cfg, "Categories", {})
+        category = self.category_var.get()
+        commands = categories.get(category, {})
+        names = sorted(commands.keys()) if isinstance(commands, dict) else []
+
+        menu = self.command_menu["menu"]
+        menu.delete(0, "end")
+
+        for name in names:
+            menu.add_command(label=name, command=lambda value=name: self.command_var.set(value))
+
+        if names and self.command_var.get() not in names:
+            self.command_var.set(names[0])
+        elif not names:
+            self.command_var.set("")
+
+    def refresh(self):
+        self.listbox.delete(0, END)
+        self.snapshot = []
+
+        for idx, schedule in enumerate(self.get_schedules()):
+            name = schedule.get("name", f"Schedule {idx + 1}")
+            category = schedule.get("category", "")
+            command = schedule.get("command", "")
+            schedule_type = schedule.get("type", "")
+            enabled = "ON" if schedule.get("enabled") else "OFF"
+
+            last_status = schedule.get("_last_status", "never")
+            last_run = schedule.get("_last_run", "")
+            run_count = schedule.get("_run_count", 0)
+
+            status_text = last_status
+            if last_run:
+                status_text = f"{last_status} @ {last_run}"
+
+            label = (
+                f"[{enabled}] {name} — {schedule_type} — "
+                f"{category}/{command} — {status_text} — runs:{run_count}"
+            )
+            self.snapshot.append((idx, schedule))
+            self.listbox.insert(END, label)
+
+        self.info.delete("1.0", END)
+        self.info.insert("1.0", "Select a schedule or create a new one.")
+
+    def on_select(self, _event=None):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return
+
+        index = idxs[0]
+        if index < 0 or index >= len(self.snapshot):
+            return
+
+        _schedule_index, schedule = self.snapshot[index]
+
+        self.name_var.set(schedule.get("name", ""))
+
+        self.category_var.set(schedule.get("category", ""))
+        self.refresh_command_menu()
+
+        self.command_var.set(schedule.get("command", ""))
+        self.type_var.set(schedule.get("type", "interval_minutes"))
+        self.time_var.set(schedule.get("time", ""))
+        self.minutes_var.set(str(schedule.get("minutes", "")))
+        self.enabled_var.set(1 if schedule.get("enabled") else 0)
+
+        self.info.delete("1.0", END)
+        self.info.insert("1.0", pprint.pformat(schedule, indent=4))
+
+    def clear_form(self):
+        self.name_var.set("")
+        self.type_var.set("interval_minutes")
+        self.time_var.set("")
+        self.minutes_var.set("1")
+        self.enabled_var.set(1)
+        self.refresh_category_menu()
+        self.listbox.selection_clear(0, END)
+
+    def build_schedule_from_form(self):
+        name = self.name_var.get().strip()
+        category = self.category_var.get().strip()
+        command = self.command_var.get().strip()
+        schedule_type = self.type_var.get().strip()
+
+        if not name:
+            raise ValueError("Schedule name is required.")
+        if not category or not command:
+            raise ValueError("Category and command are required.")
+        if schedule_type not in ("startup", "daily", "interval_minutes"):
+            raise ValueError("Schedule type must be startup, daily, or interval_minutes.")
+
+        schedule = {
+            "name": name,
+            "category": category,
+            "command": command,
+            "type": schedule_type,
+            "enabled": bool(self.enabled_var.get()),
+        }
+
+        if schedule_type == "daily":
+            time_value = self.time_var.get().strip()
+            if not re.match(r"^\d{2}:\d{2}$", time_value):
+                raise ValueError("Daily time must be HH:MM.")
+            schedule["time"] = time_value
+
+        if schedule_type == "interval_minutes":
+            try:
+                minutes = int(self.minutes_var.get().strip())
+            except Exception:
+                raise ValueError("Interval minutes must be a number.")
+            if minutes <= 0:
+                raise ValueError("Interval minutes must be greater than zero.")
+            schedule["minutes"] = minutes
+
+        return schedule
+
+    def selected_schedule_index(self):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return None
+        return self.snapshot[idxs[0]][0]
+
+    def save_schedule(self):
+        try:
+            schedule = self.build_schedule_from_form()
+        except Exception as exc:
+            self.app.show_traceback_window("Schedule Manager", str(exc))
+            return
+
+        schedules = self.get_schedules()
+        index = self.selected_schedule_index()
+
+        if index is None:
+            schedules.append(schedule)
+        else:
+            schedules[index] = schedule
+
+        self.app.persist_full_config()
+        self.app.set_status(f"Saved schedule {schedule['name']}")
+        self.refresh()
+
+    def delete_schedule(self):
+        index = self.selected_schedule_index()
+        if index is None:
+            messagebox.showerror("Schedule Manager", "Select a schedule first.")
+            return
+
+        schedules = self.get_schedules()
+        schedule = schedules[index]
+
+        if not messagebox.askokcancel("Delete Schedule", f"Delete schedule '{schedule.get('name')}'?"):
+            return
+
+        del schedules[index]
+        self.app.persist_full_config()
+        self.clear_form()
+        self.refresh()
+
+    def toggle_enabled(self):
+        index = self.selected_schedule_index()
+        if index is None:
+            messagebox.showerror("Schedule Manager", "Select a schedule first.")
+            return
+
+        schedules = self.get_schedules()
+        schedules[index]["enabled"] = not bool(schedules[index].get("enabled"))
+
+        self.app.persist_full_config()
+        self.refresh()
+
+    def run_now(self):
+        index = self.selected_schedule_index()
+        if index is None:
+            try:
+                schedule = self.build_schedule_from_form()
+            except Exception as exc:
+                self.app.show_traceback_window("Schedule Manager", str(exc))
+                return
+        else:
+            schedule = self.get_schedules()[index]
+
+        self.app.run_scheduled_command(schedule)
+
+class ScheduleHistoryWindow:
+    def __init__(self, app):
+        self.app = app
+        self.window = Toplevel(app.root)
+        self.window.title("Schedule History")
+        self.window.geometry("980x560")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Schedule History",
+            bd=4,
+            width=32,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(
+            action_row,
+            text="Refresh",
+            width=14,
+            bg="navy",
+            fg="white",
+            command=self.refresh,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Clear History",
+            width=14,
+            bg="#7f6000",
+            fg="white",
+            command=self.clear_history,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Close",
+            width=14,
+            bg="red",
+            fg="black",
+            command=self.window.destroy,
+        ).pack(side=RIGHT)
+
+        body = Frame(outer)
+        body.pack(fill=BOTH, expand=True)
+
+        left = Frame(body)
+        left.pack(side=LEFT, fill=BOTH, expand=True)
+
+        right = Frame(body)
+        right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
+
+        self.listbox = Listbox(left, width=70, height=24)
+        self.listbox.pack(side=LEFT, fill=BOTH, expand=True)
+
+        scrollbar = Scrollbar(left, command=self.listbox.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self.listbox.config(yscrollcommand=scrollbar.set)
+
+        self.info = Text(right, wrap="word", width=44, height=24)
+        self.info.pack(fill=BOTH, expand=True)
+
+        self.snapshot = []
+        self.listbox.bind("<<ListboxSelect>>", self.on_select)
+
+        self.refresh()
+
+    def get_history(self):
+        return self.app.get_schedule_history()
+
+    def refresh(self):
+        self.listbox.delete(0, END)
+        self.snapshot = []
+
+        for idx, entry in enumerate(self.get_history()):
+            timestamp = entry.get("timestamp", "")
+            status = entry.get("status", "")
+            name = entry.get("name", "")
+            category = entry.get("category", "")
+            command = entry.get("command", "")
+
+            label = f"{timestamp} [{status}] {name} — {category}/{command}"
+            self.snapshot.append(entry)
+            self.listbox.insert(END, label)
+
+        self.info.delete("1.0", END)
+        if not self.snapshot:
+            self.info.insert("1.0", "No schedule history yet.")
+        else:
+            self.info.insert("1.0", "Select a history entry.")
+
+    def on_select(self, _event=None):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return
+
+        index = idxs[0]
+        if index < 0 or index >= len(self.snapshot):
+            return
+
+        entry = self.snapshot[index]
+
+        self.info.delete("1.0", END)
+        self.info.insert("1.0", pprint.pformat(entry, indent=4))
+
+    def clear_history(self):
+        if not messagebox.askokcancel(
+            "Clear Schedule History",
+            "Clear all schedule history entries?",
+        ):
+            return
+
+        setattr(self.app.cfg, "ScheduleHistory", [])
+        self.app.persist_full_config()
+        self.refresh()
+
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
         self.root = root
@@ -3000,6 +2932,7 @@ class TermForgeApp:
         self.hotkey_listener = None
         self.hotkeys_enabled = False
         self.hotkey_status = "Hotkeys not initialized."
+        self.set_status("Scheduler: PAUSED" if self.is_scheduler_paused() else "Scheduler: ACTIVE")
 
         if self.debug:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -3013,10 +2946,59 @@ class TermForgeApp:
         self.initialize_hotkeys()
         self.root.after(250, self.safe_initial_select)
 
-    def show_traceback_window(self, title: str, exc: Exception) -> None:
-        import traceback
+    def show_toast(self, message: str, duration_ms: int = 4000) -> None:
+        win = Toplevel(self.root)
+        win.overrideredirect(True)
 
+        width = 360
+        height = 120
+
+        try:
+            screen_w = win.winfo_screenwidth()
+            screen_h = win.winfo_screenheight()
+        except Exception:
+            screen_w = 1920
+            screen_h = 1080
+
+        x = screen_w - width - 24
+        y = screen_h - height - 64
+
+        win.geometry(f"{width}x{height}+{x}+{y}")
+
+        outer = Frame(
+            win,
+            bg="#222222",
+            bd=2,
+            relief="raised",
+            padx=10,
+            pady=10,
+        )
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="TermForge Notification",
+            bg="#444444",
+            fg="white",
+            relief="raised",
+            bd=2,
+        ).pack(fill=X, pady=(0, 8))
+
+        Label(
+            outer,
+            text=message,
+            bg="#222222",
+            fg="white",
+            justify=LEFT,
+            wraplength=320,
+        ).pack(fill=BOTH, expand=True)
+
+        win.after(duration_ms, win.destroy)
+
+    def show_traceback_window(self, title: str, exc) -> None:
         tb = traceback.format_exc()
+        if tb.strip() == "NoneType: None":
+            tb = str(exc)
 
         win = Toplevel(self.root)
         win.title(title)
@@ -3113,7 +3095,7 @@ class TermForgeApp:
             if isinstance(history, list):
                 self.command_history = history[:MAX_HISTORY]
         except Exception as exc:
-            self.show_traceback_windoow(f"Could not load state file: {exc}")
+            self.show_traceback_window("Could not load state file: ", exc)
 
     def save_state(self) -> None:
         try:
@@ -3123,7 +3105,7 @@ class TermForgeApp:
             }
             STATE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except Exception as exc:
-            self.show_traceback_windoow(f"Could not save state file: {exc}")
+            self.show_traceback_window("Could not save state file: ", str(exc))
 
     def on_close(self) -> None:
         self.save_state()
@@ -3138,45 +3120,32 @@ class TermForgeApp:
         finally:
             self.root.destroy()
 
-    def run_scheduled_command(self, schedule: dict) -> None:
-        from datetime import datetime
+    def is_scheduler_paused(self) -> bool:
+        return bool(getattr(self.cfg, "SchedulerPaused", False))
 
-        category = schedule.get("category")
-        command = schedule.get("command")
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        schedule["_last_run"] = now
-        schedule["_run_count"] = int(schedule.get("_run_count", 0) or 0) + 1
+    def set_scheduler_paused(self, paused: bool) -> None:
+        setattr(self.cfg, "SchedulerPaused", bool(paused))
+        self.persist_full_config()
 
-        categories = getattr(self.cfg, "Categories", {})
+        state = "PAUSED" if paused else "ACTIVE"
+        self.set_status(f"Scheduler: {state}")
+        self.log(f"Scheduler {state.lower()}.")
 
-        try:
-            if category not in categories:
-                raise TermForgeError(f"Scheduled category not found: {category}")
 
-            if command not in categories[category]:
-                raise TermForgeError(f"Scheduled command not found: {category}/{command}")
+    def pause_scheduler(self) -> None:
+        self.set_scheduler_paused(True)
 
-            self.set_status(f"Running scheduled command: {category}/{command}")
-            self.select_cmd(None, category, command)
 
-            schedule["_last_status"] = "success"
-            schedule["_last_error"] = ""
+    def resume_scheduler(self) -> None:
+        self.set_scheduler_paused(False)
 
-        except Exception as exc:
-            schedule["_last_status"] = "failed"
-            schedule["_last_error"] = str(exc)
 
-            try:
-                self.show_traceback_window(
-                    f"Scheduled Command Failed: {category}/{command}",
-                    exc,
-                )
-            except Exception:
-                pass
+    def toggle_scheduler(self) -> None:
+        self.set_scheduler_paused(not self.is_scheduler_paused())
 
-        finally:
-            self.persist_full_config()
+    def open_schedule_manager(self) -> None:
+        ScheduleManagerWindow(self)
 
     def get_chain_runner(self, total_steps: int):
         runner = getattr(self, "chain_runner_window", None)
@@ -3382,22 +3351,6 @@ class TermForgeApp:
             setattr(self.cfg, "Windows", windows)
         return windows
 
-    def persist_windows(self) -> None:
-        windows = self.get_windows_dict()
-        try:
-            text = CONFIG_FILE.read_text(encoding="utf-8")
-            rendered = pprint.pformat(windows, indent=4)
-            if re.search(r"(?m)^Windows\s*=", text):
-                text = re.sub(
-                    r"(?ms)^Windows\s*=\s*{.*?}(?=^\S|\Z)",
-                    f"Windows = {rendered}\n",
-                    text,
-                )
-            else:
-                text += f"\n\nWindows = {rendered}\n"
-            CONFIG_FILE.write_text(text, encoding="utf-8")
-        except Exception as exc:
-            self.show_traceback_window("Could not persist window profiles: ", exc)
 
 
     def get_hotkeys_dict(self) -> dict:
@@ -3408,43 +3361,9 @@ class TermForgeApp:
         return hotkeys
 
 
-    def persist_hotkeys(self) -> None:
-        hotkeys = self.get_hotkeys_dict()
-        try:
-            text = CONFIG_FILE.read_text(encoding="utf-8")
-            rendered = pprint.pformat(hotkeys, indent=4)
-            if re.search(r"(?m)^Hotkeys\s*=", text):
-                text = re.sub(
-                    r"(?ms)^Hotkeys\s*=\s*{.*?}(?=^\S|\Z)",
-                    f"Hotkeys = {rendered}\n",
-                    text,
-                )
-            else:
-                text += f"\n\nHotkeys = {rendered}\n"
-            CONFIG_FILE.write_text(text, encoding="utf-8")
-        except Exception as exc:
-            selg.show_traceback_window("Could not persist hotkeys: ",exc)
-
-    def open_hotkey_editor(self) -> None:
-        HotkeyEditorWindow(self)
 
 
-    def persist_hotkeys(self) -> None:
-        hotkeys = self.get_hotkeys_dict()
-        try:
-            text = CONFIG_FILE.read_text(encoding="utf-8")
-            rendered = pprint.pformat(hotkeys, indent=4)
-            if re.search(r"(?m)^Hotkeys\s*=", text):
-                text = re.sub(
-                    r"(?ms)^Hotkeys\s*=\s*{.*?}(?=^\S|\Z)",
-                    f"Hotkeys = {rendered}\n",
-                    text,
-                )
-            else:
-                text += f"\n\nHotkeys = {rendered}\n"
-            CONFIG_FILE.write_text(text, encoding="utf-8")
-        except Exception as exc:
-            self.log(f"Could not persist hotkeys: {exc}")
+
 
     def get_disabled_plugins(self) -> list[str]:
         disabled = getattr(self.cfg, "DisabledPlugins", None)
@@ -3469,7 +3388,7 @@ class TermForgeApp:
                 text += f"\n\nDisabledPlugins = {rendered}\n"
             CONFIG_FILE.write_text(text, encoding="utf-8")
         except Exception as exc:
-            self.log(f"Could not persist disabled plugins: {exc}")
+            self.show_traceback_window("Could not persist disabled plugins: ", exc)
 
     def disable_plugin(self, name: str) -> None:
         disabled = self.get_disabled_plugins()
@@ -3514,7 +3433,7 @@ class TermForgeApp:
                 else:
                     self.log(f"Skipping hotkey {hotkey!r}: target {target!r} not found in Categories.")
             except Exception as exc:
-                self.log(f"Skipping hotkey {hotkey!r}: {exc}")
+                self.show_tracback_window(f"Skipping hotkey {hotkey!r}: ", exc)
         return valid
 
     def trigger_hotkey_target(self, category: str, command: str, hotkey: str) -> None:
@@ -3564,7 +3483,7 @@ class TermForgeApp:
             self.log(self.hotkey_status)
         except Exception as exc:
             self.hotkeys_enabled = False
-            self.hotkey_status = f"Could not start global hotkeys: {exc}"
+            self.show_traceback_window("Could not start global hotkeys: ", exc)
             self.log(self.hotkey_status)
 
     def show_hotkeys_help(self) -> None:
@@ -3643,7 +3562,7 @@ class TermForgeApp:
                 plugins[name] = module
                 mtimes[name] = mtime
             except Exception as exc:
-                errors[name] = str(exc)
+                self.show_traceback_window(f"{errors[name]}", exc)
         self.plugins = plugins
         self.plugin_mtimes = mtimes
         self.plugin_errors = errors
@@ -3665,7 +3584,7 @@ class TermForgeApp:
             else:
                 raise TermForgeError("Opening the plugin folder is only implemented for Linux.")
         except Exception as exc:
-            self.show_error("Plugin Folder", str(exc))
+            self.show_traceback_window("Plugin Folder", str(exc))
 
     def run_plugin(self, cmd) -> None:
         self.load_plugins(force=False)
@@ -3718,9 +3637,9 @@ class TermForgeApp:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            raise TermForgeError("Helper timed out.") from exc
+            self.show_traceback_window("Helper timed out.", exc)
         except Exception as exc:
-            raise TermForgeError(f"Could not start helper: {exc}") from exc
+            self.show_traceback_window(f"Could not start helper: {exc}", exc)
 
         stdout = (proc.stdout or "").strip()
         stderr = (proc.stderr or "").strip()
@@ -3768,7 +3687,7 @@ class TermForgeApp:
                 return
             self.select_target_window()
         except Exception as exc:
-            self.log(f"Initial selection skipped: {exc}")
+            self.show_traceback_window(f"Initial selection skipped: ", exc)
 
     def forget_saved_window(self) -> None:
         self.window_id = None
@@ -3797,7 +3716,7 @@ class TermForgeApp:
             self.select_target_window()
             messagebox.showinfo("Target Window", f"Selected window id: {self.window_id}")
         except Exception as exc:
-            self.show_error("Target Window", str(exc))
+            self.show_traceback_window("Target Window", str(exc))
 
     def select_profile(self, name: str) -> None:
         windows = self.get_windows_dict()
@@ -4045,8 +3964,7 @@ class TermForgeApp:
                 runner.step_done(str(step_cmd))
 
             except Exception as exc:
-                runner.step_failed(str(exc))
-                raise
+                self.show_traceback_window(f"{runner.step_failed}", exc)
 
         self.add_history_entry("chain", f"{total} steps", source=source)
         self.set_status(f"Chain complete: {total} step(s).")
@@ -4169,7 +4087,30 @@ class TermForgeApp:
             else:
                 raise TermForgeError(f"Unknown command type: {cmd_type}")
         except Exception as exc:
-            self.show_error("Command failed", f"{exc}\n\n{traceback.format_exc()}")
+            self.show_traceback_window(f"Command failed", str(exc))
+
+    def get_schedule_history(self) -> list:
+        history = getattr(self.cfg, "ScheduleHistory", [])
+        if not isinstance(history, list):
+            history = []
+            setattr(self.cfg, "ScheduleHistory", history)
+        return history
+
+    def add_schedule_history(self, schedule: dict, status: str, error: str = "") -> None:
+        history = self.get_schedule_history()
+        history.insert(0, {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "name": schedule.get("name", ""),
+            "category": schedule.get("category", ""),
+            "command": schedule.get("command", ""),
+            "type": schedule.get("type", ""),
+            "status": status,
+            "error": error,
+        })
+        del history[200:]
+
+    def open_schedule_history(self) -> None:
+        ScheduleHistoryWindow(self)
 
     def get_schedules(self) -> list:
         schedules = getattr(self.cfg, "Schedules", [])
@@ -4180,31 +4121,75 @@ class TermForgeApp:
 
 
     def run_scheduled_command(self, schedule: dict) -> None:
+        from datetime import datetime
+
         category = schedule.get("category")
         command = schedule.get("command")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        schedule["_last_run"] = now
+        schedule["_run_count"] = int(schedule.get("_run_count", 0) or 0) + 1
+
+        self.log(f"Scheduled command running: {category}/{command}")
 
         categories = getattr(self.cfg, "Categories", {})
 
-        if category not in categories:
-            self.log(f"Scheduled category not found: {category}")
-            return
-
-        if command not in categories[category]:
-            self.log(f"Scheduled command not found: {category}/{command}")
-            return
-
-        self.set_status(f"Running scheduled command: {category}/{command}")
-
         try:
+            if category not in categories:
+                raise TermForgeError(f"Scheduled category not found: {category}")
+
+            if command not in categories[category]:
+                raise TermForgeError(f"Scheduled command not found: {category}/{command}")
+
+            entry = categories[category][command]
+            cmd_type, _cmd, _options = parse_command_entry(entry)
+
+#            if cmd_type in (2, "send") and not getattr(self, "selected_window_id", None):
+#                raise TermForgeError(
+#                    f"Scheduled command requires a selected target window: {category}/{command}"
+#                )
+            self.set_status(f"Running scheduled command: {category}/{command}")
             self.select_cmd(None, category, command)
-        except Exception as exc:
-            self.show_traceback_window(
-                f"Scheduled Command Failed: {category}/{command}",
-                exc,
+
+            schedule["_last_status"] = "success"
+            schedule["_last_error"] = ""
+
+            self.add_schedule_history(schedule, "success", "")
+            self.log(f"Scheduled command success: {category}/{command}")
+
+            self.show_toast(
+                f"✓ Scheduled command completed:\n{category}/{command}"
             )
 
+        except Exception as exc:
+            schedule["_last_status"] = "failed"
+            schedule["_last_error"] = str(exc)
+
+            self.add_schedule_history(schedule, "failed", str(exc))
+            self.log(f"Scheduled command failed: {category}/{command}: {exc}")
+
+            self.show_toast(
+                f"✗ Scheduled command failed:\n{category}/{command}"
+            )
+
+            try:
+                self.show_traceback_window(
+                    f"Scheduled Command Failed: {category}/{command}",
+                    exc,
+                )
+
+                self.log(f"Scheduled command failed: {category}/{command}: ", exc)
+
+            except Exception:
+                pass
+
+        finally:
+            self.persist_full_config()
 
     def run_startup_schedules(self) -> None:
+        if self.is_scheduler_paused():
+            self.set_status("Scheduler paused; startup schedules skipped.")
+            return
         for schedule in self.get_schedules():
             if schedule.get("enabled") and schedule.get("type") == "startup":
                 self.run_scheduled_command(schedule)
@@ -4214,6 +4199,11 @@ class TermForgeApp:
         from datetime import datetime
 
         now = datetime.now()
+
+        if self.is_scheduler_paused():
+            self.root.after(30_000, self.scheduler_tick)
+            return
+
         now_hhmm = now.strftime("%H:%M")
 
         for schedule in self.get_schedules():
@@ -4259,8 +4249,6 @@ class TermForgeApp:
 
         self.run_cmd(cmd_type, cmd, options, parent_window)
 
-    def run_favorite(self, category: str, subcategory: str) -> None:
-        self.select_cmd(None, category, subcategory)
 
     def category_matches_search(self, category: str, query: str) -> bool:
         if not query:
@@ -4399,27 +4387,11 @@ class TermForgeApp:
     def parse_command_entry_public(self, entry):
         return parse_command_entry(entry)
 
-    def persist_categories(self) -> None:
-        categories = getattr(self.cfg, "Categories", {})
-        try:
-            text = CONFIG_FILE.read_text(encoding="utf-8")
-            rendered = pprint.pformat(categories, indent=4)
-            if re.search(r"(?m)^Categories\s*=", text):
-                text = re.sub(
-                    r"(?ms)^Categories\s*=\s*{.*?}(?=^\S|\Z)",
-                    f"Categories = {rendered}\n",
-                    text,
-                )
-            else:
-                text += f"\n\nCategories = {rendered}\n"
-            CONFIG_FILE.write_text(text, encoding="utf-8")
-        except Exception as exc:
-            self.log(f"Could not persist categories: {exc}")
 
     def export_config_backup(self) -> None:
         try:
             if not CONFIG_FILE.exists():
-                self.show_traceback_window("Export Config", "Config file does not exist yet.". exc)
+                self.show_traceback_window("Export Config", "Config file does not exist yet.")
                 return
 
             target = filedialog.asksaveasfilename(
@@ -4525,8 +4497,7 @@ class TermForgeApp:
         CommandPaletteWindow(self)
         return "break"
 
-    def open_schedule_manager(self) -> None:
-        ScheduleManagerWindow(self)
+
 
     def bind_global_shortcuts(self) -> None:
         self.root.bind_all("<Control-p>", self.open_command_palette)
@@ -4543,10 +4514,12 @@ class TermForgeApp:
             usage = getattr(self.cfg, "Usage", {})
             hotkeys = getattr(self.cfg, "Hotkeys", {})
             disabled_plugins = getattr(self.cfg, "DisabledPlugins", [])
-            categories = getattr(self.cfg, "Categories", {})
             chain_templates = getattr(self.cfg, "ChainTemplates", {})
             tags = getattr(self.cfg, "Tags", {})
             schedules = getattr(self.cfg, "Schedules", [])
+            schedule_history = getattr(self.cfg, "ScheduleHistory", [])
+            scheduler_paused = getattr(self.cfg, "SchedulerPaused", False)
+            categories = getattr(self.cfg, "Categories", {})
 
             lines = [
                 "# TermForge user configuration",
@@ -4555,40 +4528,22 @@ class TermForgeApp:
                 f"terminal = {pprint.pformat(terminal, indent=4)}",
                 f"debug = {pprint.pformat(debug, indent=4)}",
                 f"Windows = {pprint.pformat(windows, indent=4)}",
+                f"Favorites = {pprint.pformat(favorites, indent=4)}",
                 f"Recent = {pprint.pformat(recent, indent=4)}",
                 f"Usage = {pprint.pformat(usage, indent=4)}",
                 f"Hotkeys = {pprint.pformat(hotkeys, indent=4)}",
                 f"DisabledPlugins = {pprint.pformat(disabled_plugins, indent=4)}",
                 f"ChainTemplates = {pprint.pformat(chain_templates, indent=4)}",
-                f"Categories = {pprint.pformat(categories, indent=4)}",
                 f"Tags = {pprint.pformat(tags, indent=4)}",
                 f"Schedules = {pprint.pformat(schedules, indent=4)}",
-                "",
-            ]
-
-            CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
-        except Exception as exc:
-            chain_templates = getattr(self.cfg, "ChainTemplates", {})
-
-            lines = [
-                "# TermForge user configuration",
-                "# Edit Categories below.",
-                "",
-                f"terminal = {pprint.pformat(terminal, indent=4)}",
-                f"debug = {pprint.pformat(debug, indent=4)}",
-                f"Windows = {pprint.pformat(windows, indent=4)}",
-                f"Recent = {pprint.pformat(recent, indent=4)}",
-                f"Usage = {pprint.pformat(usage, indent=4)}",
-                f"Hotkeys = {pprint.pformat(hotkeys, indent=4)}",
-                f"DisabledPlugins = {pprint.pformat(disabled_plugins, indent=4)}",
-                f"ChainTemplates = {pprint.pformat(chain_templates, indent=4)}",
+                f"ScheduleHistory = {pprint.pformat(schedule_history, indent=4)}",
+                f"SchedulerPaused = {repr(bool(scheduler_paused))}",
                 f"Categories = {pprint.pformat(categories, indent=4)}",
                 "",
             ]
-
             CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
         except Exception as exc:
-            self.log(f"Could not persist full config: {exc}")
+            self.show_traceback_window(f"Could not persist full config: ", exc)
 
     def persist_categories(self) -> None:
         self.persist_full_config()
@@ -4713,8 +4668,12 @@ class TermForgeApp:
         tools_menu.add_separator()
         tools_menu.add_command(label="Hotkeys", command=self.show_hotkeys_help)
         tools_menu.add_command(label="Hotkey Editor", command=self.open_hotkey_editor)
-        tools_menu.add_separator()
         tools_menu.add_command(label="Schedule Manager", command=self.open_schedule_manager)
+        tools_menu.add_command(label="Schedule History", command=self.open_schedule_history)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Pause Scheduler", command=self.pause_scheduler)
+        tools_menu.add_command(label="Resume Scheduler", command=self.resume_scheduler)
+        tools_menu.add_command(label="Toggle Scheduler Pause", command=self.toggle_scheduler)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         help_menu = Menu(menubar, tearoff=0)
