@@ -2914,6 +2914,204 @@ class ScheduleHistoryWindow:
         self.app.persist_full_config()
         self.refresh()
 
+class BackupManagerWindow:
+    def __init__(self, app):
+        self.app = app
+        self.window = Toplevel(app.root)
+        self.window.title("Backup Manager")
+        self.window.geometry("920x540")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Backup Manager",
+            bd=4,
+            width=32,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(action_row, text="Refresh", width=14, bg="navy", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Restore", width=14, bg="#7f6000", fg="white", command=self.restore_selected).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Export Copy", width=14, bg="#2f5597", fg="white", command=self.export_selected).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Delete", width=14, bg="#7f0000", fg="white", command=self.delete_selected).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Open Folder", width=14, bg="#444444", fg="white", command=self.open_folder).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
+
+        body = Frame(outer)
+        body.pack(fill=BOTH, expand=True)
+
+        left = Frame(body)
+        left.pack(side=LEFT, fill=BOTH, expand=True)
+
+        right = Frame(body)
+        right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
+
+        self.listbox = Listbox(left, width=62, height=24)
+        self.listbox.pack(side=LEFT, fill=BOTH, expand=True)
+
+        scrollbar = Scrollbar(left, command=self.listbox.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self.listbox.config(yscrollcommand=scrollbar.set)
+
+        self.info = Text(right, wrap="word", width=44, height=24)
+        self.info.pack(fill=BOTH, expand=True)
+
+        self.snapshot = []
+        self.listbox.bind("<<ListboxSelect>>", self.on_select)
+
+        self.refresh()
+
+    def collect_backups(self):
+        backup_dir = self.app.get_backup_dir()
+        files = sorted(backup_dir.glob("*.py"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+        rows = []
+        for path in files:
+            try:
+                stat = path.stat()
+                rows.append({
+                    "path": path,
+                    "name": path.name,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                    "size": stat.st_size,
+                })
+            except Exception:
+                pass
+
+        return rows
+
+    def refresh(self):
+        self.snapshot = self.collect_backups()
+        self.listbox.delete(0, END)
+
+        for item in self.snapshot:
+            size_kb = item["size"] / 1024
+            self.listbox.insert(
+                END,
+                f'{item["modified"]} — {item["name"]} — {size_kb:.1f} KB'
+            )
+
+        self.info.delete("1.0", END)
+        if not self.snapshot:
+            self.info.insert("1.0", "No backups found.")
+        else:
+            self.info.insert("1.0", "Select a backup.")
+
+    def selected_item(self):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return None
+
+        index = idxs[0]
+        if index < 0 or index >= len(self.snapshot):
+            return None
+
+        return self.snapshot[index]
+
+    def on_select(self, _event=None):
+        item = self.selected_item()
+        self.info.delete("1.0", END)
+
+        if not item:
+            return
+
+        lines = [
+            f'Name: {item["name"]}',
+            f'Path: {item["path"]}',
+            f'Modified: {item["modified"]}',
+            f'Size: {item["size"]} bytes',
+            "",
+            "Actions:",
+            "  Restore      Replace current config with this backup",
+            "  Export Copy  Save this backup somewhere else",
+            "  Delete       Remove this backup file",
+        ]
+
+        self.info.insert("1.0", "\n".join(lines))
+
+    def restore_selected(self):
+        item = self.selected_item()
+        if not item:
+            messagebox.showerror("Backup Manager", "Select a backup first.")
+            return
+
+        if not messagebox.askokcancel(
+            "Restore Backup",
+            f"Restore this backup?\n\n{item['name']}\n\n"
+            "Your current config will be backed up first.",
+        ):
+            return
+
+        current_backup = self.app.create_automatic_backup()
+        shutil.copy2(item["path"], CONFIG_FILE)
+
+        messagebox.showinfo(
+            "Restore Backup",
+            "Backup restored successfully.\n\n"
+            f"Previous config was backed up to:\n{current_backup}\n\n"
+            "Restart TermForge to reload the restored config.",
+        )
+
+        self.app.set_status("Backup restored. Restart recommended.")
+
+    def export_selected(self):
+        item = self.selected_item()
+        if not item:
+            messagebox.showerror("Backup Manager", "Select a backup first.")
+            return
+
+        target = filedialog.asksaveasfilename(
+            title="Export Backup Copy",
+            defaultextension=".py",
+            initialfile=item["name"],
+            filetypes=[
+                ("Python config", "*.py"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if not target:
+            return
+
+        shutil.copy2(item["path"], target)
+        messagebox.showinfo("Backup Manager", f"Backup exported to:\n\n{target}")
+
+    def delete_selected(self):
+        item = self.selected_item()
+        if not item:
+            messagebox.showerror("Backup Manager", "Select a backup first.")
+            return
+
+        if not messagebox.askokcancel(
+            "Delete Backup",
+            f"Delete backup?\n\n{item['name']}",
+        ):
+            return
+
+        try:
+            Path(item["path"]).unlink()
+        except Exception as exc:
+            self.app.show_traceback_window("Delete Backup Failed", exc)
+            return
+
+        self.refresh()
+
+    def open_folder(self):
+        backup_dir = self.app.get_backup_dir()
+
+        try:
+            subprocess.Popen(["xdg-open", str(backup_dir)])
+        except Exception as exc:
+            self.app.show_traceback_window("Open Backup Folder Failed", exc)
+
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
         self.root = root
@@ -4587,7 +4785,8 @@ class TermForgeApp:
         CommandPaletteWindow(self)
         return "break"
 
-
+    def open_backup_manager(self) -> None:
+        BackupManagerWindow(self)
 
     def bind_global_shortcuts(self) -> None:
         self.root.bind_all("<Control-p>", self.open_command_palette)
@@ -4774,12 +4973,14 @@ class TermForgeApp:
         tools_menu.add_separator()
         tools_menu.add_command(label="Hotkeys", command=self.show_hotkeys_help)
         tools_menu.add_command(label="Hotkey Editor", command=self.open_hotkey_editor)
+        tools_menu.add_separator()
         tools_menu.add_command(label="Schedule Manager", command=self.open_schedule_manager)
         tools_menu.add_command(label="Schedule History", command=self.open_schedule_history)
-        tools_menu.add_separator()
         tools_menu.add_command(label="Pause Scheduler", command=self.pause_scheduler)
         tools_menu.add_command(label="Resume Scheduler", command=self.resume_scheduler)
         tools_menu.add_command(label="Toggle Scheduler Pause", command=self.toggle_scheduler)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Backup Manager", command=self.open_backup_manager)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         help_menu = Menu(menubar, tearoff=0)
