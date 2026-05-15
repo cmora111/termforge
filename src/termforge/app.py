@@ -3112,6 +3112,187 @@ class BackupManagerWindow:
         except Exception as exc:
             self.app.show_traceback_window("Open Backup Folder Failed", exc)
 
+class TagManagerWindow:
+    def __init__(self, app):
+        self.app = app
+        self.window = Toplevel(app.root)
+        self.window.title("Tag Manager")
+        self.window.geometry("980x560")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Tag Manager",
+            bd=4,
+            width=32,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(action_row, text="Save Tags", width=14, bg="darkgreen", fg="white", command=self.save_tags).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Clear Tags", width=14, bg="#7f6000", fg="white", command=self.clear_tags).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Refresh", width=14, bg="navy", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
+
+        search_row = Frame(outer)
+        search_row.pack(fill=X, pady=(0, 8))
+
+        Label(search_row, text="Filter:", width=10, anchor="w").pack(side=LEFT)
+        self.filter_var = StringVar()
+        Entry(search_row, textvariable=self.filter_var, width=40).pack(side=LEFT, fill=X, expand=True)
+
+        body = Frame(outer)
+        body.pack(fill=BOTH, expand=True)
+
+        left = Frame(body)
+        left.pack(side=LEFT, fill=BOTH, expand=True)
+
+        right = Frame(body)
+        right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
+
+        self.listbox = Listbox(left, width=52, height=24)
+        self.listbox.pack(side=LEFT, fill=BOTH, expand=True)
+
+        scrollbar = Scrollbar(left, command=self.listbox.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self.listbox.config(yscrollcommand=scrollbar.set)
+
+        Label(right, text="Tags comma/space separated:", anchor="w").pack(fill=X)
+
+        self.tags_text = Text(right, wrap="word", height=5)
+        self.tags_text.pack(fill=X, pady=(4, 8))
+
+        self.info = Text(right, wrap="word", height=18)
+        self.info.pack(fill=BOTH, expand=True)
+
+        self.snapshot = []
+
+        self.listbox.bind("<<ListboxSelect>>", self.on_select)
+        self.filter_var.trace_add("write", lambda *_args: self.refresh())
+
+        self.refresh()
+
+    def collect_commands(self):
+        rows = []
+        categories = getattr(self.app.cfg, "Categories", {})
+
+        for category in sorted(categories.keys()):
+            commands = categories.get(category, {})
+            if not isinstance(commands, dict):
+                continue
+
+            for name in sorted(commands.keys()):
+                tags = self.app.get_command_tags(category, name)
+                rows.append({
+                    "category": category,
+                    "name": name,
+                    "tags": tags,
+                    "key": self.app.command_key(category, name),
+                })
+
+        return rows
+
+    def refresh(self):
+        query = self.filter_var.get().strip().lower()
+
+        self.snapshot = []
+        self.listbox.delete(0, END)
+
+        for item in self.collect_commands():
+            tag_text = " ".join(item["tags"])
+            search_blob = f'{item["category"]} {item["name"]} {tag_text}'.lower()
+
+            if query and query not in search_blob:
+                continue
+
+            tags_display = ", ".join(item["tags"]) if item["tags"] else "(untagged)"
+            label = f'{item["category"]} -> {item["name"]}   [{tags_display}]'
+
+            self.snapshot.append(item)
+            self.listbox.insert(END, label)
+
+        self.tags_text.delete("1.0", END)
+        self.info.delete("1.0", END)
+
+        if not self.snapshot:
+            self.info.insert("1.0", "No commands match the current filter.")
+        else:
+            self.info.insert("1.0", "Select a command to edit its tags.")
+
+    def selected_item(self):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return None
+
+        index = idxs[0]
+        if index < 0 or index >= len(self.snapshot):
+            return None
+
+        return self.snapshot[index]
+
+    def on_select(self, _event=None):
+        item = self.selected_item()
+        if not item:
+            return
+
+        self.tags_text.delete("1.0", END)
+        self.tags_text.insert("1.0", " ".join(item["tags"]))
+
+        lines = [
+            f'Category: {item["category"]}',
+            f'Command: {item["name"]}',
+            f'Key: {item["key"]}',
+            "",
+            "Tags:",
+            ", ".join(item["tags"]) if item["tags"] else "(none)",
+            "",
+            "Tip:",
+            "Use simple tags like git deploy server admin docker.",
+        ]
+
+        self.info.delete("1.0", END)
+        self.info.insert("1.0", "\n".join(lines))
+
+    def save_tags(self):
+        item = self.selected_item()
+        if not item:
+            messagebox.showerror("Tag Manager", "Select a command first.")
+            return
+
+        tag_text = self.tags_text.get("1.0", END).strip()
+
+        self.app.set_command_tags(
+            item["category"],
+            item["name"],
+            tag_text,
+        )
+
+        self.app.set_status(f'Updated tags for {item["category"]}/{item["name"]}')
+        self.refresh()
+
+    def clear_tags(self):
+        item = self.selected_item()
+        if not item:
+            messagebox.showerror("Tag Manager", "Select a command first.")
+            return
+
+        if not messagebox.askokcancel(
+            "Clear Tags",
+            f'Clear tags for {item["category"]}/{item["name"]}?',
+        ):
+            return
+
+        self.app.set_command_tags(item["category"], item["name"], "")
+        self.app.set_status(f'Cleared tags for {item["category"]}/{item["name"]}')
+        self.refresh()
+
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
         self.root = root
@@ -3324,6 +3505,9 @@ class TermForgeApp:
 
     def get_config_path(self) -> Path:
         return CONFIG_FILE
+
+    def open_tag_manager(self) -> None:
+        TagManagerWindow(self)
 
 
     def get_backup_dir(self) -> Path:
@@ -4981,6 +5165,8 @@ class TermForgeApp:
         tools_menu.add_command(label="Toggle Scheduler Pause", command=self.toggle_scheduler)
         tools_menu.add_separator()
         tools_menu.add_command(label="Backup Manager", command=self.open_backup_manager)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Tag Manager", command=self.open_tag_manager)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         help_menu = Menu(menubar, tearoff=0)
