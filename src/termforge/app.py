@@ -2120,6 +2120,7 @@ class CommandPaletteWindow:
 
         for term in terms:
             name_score = self.fuzzy_match_score(term, item["name"])
+            tag_score = self.fuzzy_match_score(term, " ".join(item.get("tags", [])))
             category_score = self.fuzzy_match_score(term, item["category"])
             preview_score = self.fuzzy_match_score(term, item["preview"])
 
