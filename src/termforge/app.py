@@ -3294,6 +3294,108 @@ class TagManagerWindow:
         self.app.set_status(f'Cleared tags for {item["category"]}/{item["name"]}')
         self.refresh()
 
+class ExecutionQueueWindow:
+    def __init__(self, app):
+        self.app = app
+        self.window = Toplevel(app.root)
+        self.window.title("Execution Queue")
+        self.window.geometry("820x480")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Execution Queue",
+            bd=4,
+            width=32,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(
+            action_row,
+            text="Refresh",
+            width=14,
+            bg="navy",
+            fg="white",
+            command=self.refresh,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Run Next",
+            width=14,
+            bg="darkgreen",
+            fg="white",
+            command=self.run_next,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Clear Queue",
+            width=14,
+            bg="#7f6000",
+            fg="white",
+            command=self.clear_queue,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Close",
+            width=14,
+            bg="red",
+            fg="black",
+            command=self.window.destroy,
+        ).pack(side=RIGHT)
+
+        self.listbox = Listbox(outer, width=90, height=18)
+        self.listbox.pack(fill=BOTH, expand=True)
+
+        self.info = Text(outer, wrap="word", height=6)
+        self.info.pack(fill=X, pady=(8, 0))
+
+        self.refresh()
+
+    def refresh(self):
+        self.listbox.delete(0, END)
+
+        status = "RUNNING" if self.app.execution_running else "IDLE"
+        self.info.delete("1.0", END)
+        self.info.insert(
+            "1.0",
+            f"Status: {status}\n"
+            f"Pending jobs: {len(self.app.execution_queue)}"
+        )
+
+        for index, job in enumerate(self.app.execution_queue, start=1):
+            self.listbox.insert(
+                END,
+                f'{index}. [{job.get("source", "manual")}] '
+                f'{job.get("category")}/{job.get("command")} '
+                f'@ {job.get("created_at", "")}'
+            )
+
+    def run_next(self):
+        self.app.process_execution_queue()
+        self.refresh()
+
+    def clear_queue(self):
+        if not messagebox.askokcancel(
+            "Clear Queue",
+            "Clear all pending queued jobs?",
+        ):
+            return
+
+        self.app.execution_queue.clear()
+        self.app.set_status("Execution queue cleared.")
+        self.refresh()
+
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
         self.root = root
@@ -3317,6 +3419,8 @@ class TermForgeApp:
         self.hotkey_status = "Hotkeys not initialized."
         self.set_status("Scheduler: PAUSED" if self.is_scheduler_paused() else "Scheduler: ACTIVE")
         self._last_backup_time = 0
+        self.execution_queue = []
+        self.execution_running = False
 
         if self.debug:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -3506,6 +3610,94 @@ class TermForgeApp:
 
     def get_config_path(self) -> Path:
         return CONFIG_FILE
+
+    def open_execution_queue(self) -> None:
+        ExecutionQueueWindow(self)
+
+    def is_scheduler_paused(self) -> bool:
+        return bool(getattr(self.cfg, "SchedulerPaused", False))
+
+
+    def set_scheduler_paused(self, paused: bool) -> None:
+        setattr(self.cfg, "SchedulerPaused", bool(paused))
+        self.persist_full_config()
+
+        state = "PAUSED" if paused else "ACTIVE"
+        self.set_status(f"Scheduler: {state}")
+        self.log(f"Scheduler {state.lower()}.")
+
+
+    def pause_scheduler(self) -> None:
+        self.set_scheduler_paused(True)
+
+
+    def resume_scheduler(self) -> None:
+        self.set_scheduler_paused(False)
+
+
+    def toggle_scheduler(self) -> None:
+        self.set_scheduler_paused(not self.is_scheduler_paused())
+
+    def enqueue_command(
+        self,
+        category: str,
+        command: str,
+        source: str = "manual",
+    ) -> None:
+        self.execution_queue.append({
+            "category": category,
+            "command": command,
+            "source": source,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+        self.set_status(
+            f"Queued {category}/{command} "
+            f"({len(self.execution_queue)} pending)"
+        )
+
+        self.root.after(10, self.process_execution_queue)
+
+
+    def process_execution_queue(self) -> None:
+        if self.execution_running:
+            return
+
+        if not self.execution_queue:
+            return
+
+        job = self.execution_queue.pop(0)
+        self.execution_running = True
+
+        category = job["category"]
+        command = job["command"]
+        source = job.get("source", "manual")
+
+        try:
+            self.set_status(f"Running queued command: {category}/{command}")
+            self.log(f"Queue running [{source}]: {category}/{command}")
+
+            # direct execution path
+            self.select_cmd(None, category, command)
+
+            self.log(f"Queue complete [{source}]: {category}/{command}")
+
+        except Exception as exc:
+            self.log(f"Queue failed [{source}]: {category}/{command}: {exc}")
+
+            try:
+                self.show_traceback_window(
+                    f"Queued Command Failed: {category}/{command}",
+                    exc,
+                )
+            except Exception:
+                pass
+
+        finally:
+            self.execution_running = False
+
+            if self.execution_queue:
+                self.root.after(100, self.process_execution_queue)
 
     def open_tag_manager(self) -> None:
         TagManagerWindow(self)
@@ -4622,7 +4814,7 @@ class TermForgeApp:
 #                    f"Scheduled command requires a selected target window: {category}/{command}"
 #                )
             self.set_status(f"Running scheduled command: {category}/{command}")
-            self.select_cmd(None, category, command)
+            self.enqueue_command(category, command, source="schedule")
 
             schedule["_last_status"] = "success"
             schedule["_last_error"] = ""
@@ -5168,6 +5360,7 @@ class TermForgeApp:
         tools_menu.add_command(label="Backup Manager", command=self.open_backup_manager)
         tools_menu.add_separator()
         tools_menu.add_command(label="Tag Manager", command=self.open_tag_manager)
+        tools_menu.add_command(label="Execution Queue", command=self.open_execution_queue)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         help_menu = Menu(menubar, tearoff=0)
