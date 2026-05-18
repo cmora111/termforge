@@ -3354,23 +3354,82 @@ class ExecutionQueueWindow:
             command=self.window.destroy,
         ).pack(side=RIGHT)
 
-        self.listbox = Listbox(outer, width=90, height=18)
-        self.listbox.pack(fill=BOTH, expand=True)
+        Button(
+            action_row,
+            text="Clear Completed",
+            width=16,
+            bg="#555555",
+            fg="white",
+            command=self.clear_completed,
+        ).pack(side=LEFT, padx=(0, 6))
 
-        self.info = Text(outer, wrap="word", height=6)
-        self.info.pack(fill=X, pady=(8, 0))
+        self.info = Text(outer, wrap="word", height=5)
+        self.info.pack(fill=X, pady=(0, 8))
+
+        Label(
+            outer,
+            text="Pending Jobs",
+            anchor="w",
+            bg="#dddddd",
+            fg="black",
+        ).pack(fill=X)
+
+        self.listbox = Listbox(outer, width=90, height=10)
+        self.listbox.pack(fill=BOTH, expand=True, pady=(0, 8))
+
+        Label(
+            outer,
+            text="Recent Completed Jobs",
+            anchor="w",
+            bg="#dddddd",
+            fg="black",
+        ).pack(fill=X)
+
+        self.completed_listbox = Listbox(outer, width=90, height=8)
+        self.completed_listbox.pack(fill=BOTH, expand=True)
 
         self.refresh()
+        self.auto_refresh()
+
+    def auto_refresh(self):
+        try:
+            if self.window.winfo_exists():
+                self.refresh()
+                self.window.after(1000, self.auto_refresh)
+        except Exception:
+            pass
 
     def refresh(self):
         self.listbox.delete(0, END)
 
-        status = "RUNNING" if self.app.execution_running else "IDLE"
+        if hasattr(self, "completed_listbox"):
+            self.completed_listbox.delete(0, END)
+
+        running = getattr(self.app, "current_job", None)
+        started_at = getattr(self.app, "current_job_started_at", None)
+
+        if running:
+            duration = ""
+            if started_at:
+                seconds = int((datetime.now() - started_at).total_seconds())
+                duration = f"{seconds}s"
+
+            running_text = (
+                f"RUNNING: [{running.get('source', 'manual')}] "
+                f"{running.get('category')}/{running.get('command')}"
+            )
+
+            if duration:
+                running_text += f"\nDuration: {duration}"
+        else:
+            running_text = "RUNNING: none"
+
         self.info.delete("1.0", END)
         self.info.insert(
             "1.0",
-            f"Status: {status}\n"
-            f"Pending jobs: {len(self.app.execution_queue)}"
+            f"{running_text}\n\n"
+            f"Pending jobs: {len(self.app.execution_queue)}\n"
+            f"Completed jobs: {len(getattr(self.app, 'completed_jobs', []))}"
         )
 
         for index, job in enumerate(self.app.execution_queue, start=1):
@@ -3379,6 +3438,18 @@ class ExecutionQueueWindow:
                 f'{index}. [{job.get("source", "manual")}] '
                 f'{job.get("category")}/{job.get("command")} '
                 f'@ {job.get("created_at", "")}'
+            )
+
+        for index, job in enumerate(getattr(self.app, "completed_jobs", []), start=1):
+            status = job.get("status", "?")
+            error = job.get("error", "")
+            suffix = f" — {error}" if error else ""
+
+            self.completed_listbox.insert(
+                END,
+                f'{index}. [{status}] [{job.get("source", "manual")}] '
+                f'{job.get("category")}/{job.get("command")} '
+                f'@ {job.get("completed_at", "")}{suffix}'
             )
 
     def run_next(self):
@@ -3394,6 +3465,10 @@ class ExecutionQueueWindow:
 
         self.app.execution_queue.clear()
         self.app.set_status("Execution queue cleared.")
+        self.refresh()
+
+    def clear_completed(self):
+        self.app.completed_jobs.clear()
         self.refresh()
 
 class TermForgeApp:
@@ -3421,6 +3496,9 @@ class TermForgeApp:
         self._last_backup_time = 0
         self.execution_queue = []
         self.execution_running = False
+        self.current_job = None
+        self.current_job_started_at = None
+        self.completed_jobs = []
 
         if self.debug:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -3611,6 +3689,15 @@ class TermForgeApp:
     def get_config_path(self) -> Path:
         return CONFIG_FILE
 
+    def add_completed_job(self, job: dict, status: str, error: str = "") -> None:
+        completed = dict(job)
+        completed["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        completed["status"] = status
+        completed["error"] = error
+
+        self.completed_jobs.insert(0, completed)
+        del self.completed_jobs[50:]
+
     def open_execution_queue(self) -> None:
         ExecutionQueueWindow(self)
 
@@ -3638,12 +3725,8 @@ class TermForgeApp:
     def toggle_scheduler(self) -> None:
         self.set_scheduler_paused(not self.is_scheduler_paused())
 
-    def enqueue_command(
-        self,
-        category: str,
-        command: str,
-        source: str = "manual",
-    ) -> None:
+    def enqueue_command(self, category: str, command: str, source: str = "manual",) -> None:
+
         self.execution_queue.append({
             "category": category,
             "command": command,
@@ -3668,6 +3751,8 @@ class TermForgeApp:
 
         job = self.execution_queue.pop(0)
         self.execution_running = True
+        self.current_job = job
+        self.current_job_started_at = datetime.now()
 
         category = job["category"]
         command = job["command"]
@@ -3676,6 +3761,7 @@ class TermForgeApp:
         try:
             self.set_status(f"Running queued command: {category}/{command}")
             self.log(f"Queue running [{source}]: {category}/{command}")
+            self.add_completed_job(job, "success", "")
 
             # direct execution path
             self.select_cmd(None, category, command)
@@ -3684,6 +3770,7 @@ class TermForgeApp:
 
         except Exception as exc:
             self.log(f"Queue failed [{source}]: {category}/{command}: {exc}")
+            self.add_completed_job(job, "failed", str(exc))
 
             try:
                 self.show_traceback_window(
@@ -3694,6 +3781,8 @@ class TermForgeApp:
                 pass
 
         finally:
+            self.current_job = None
+            self.current_job_started_at = None
             self.execution_running = False
 
             if self.execution_queue:
@@ -4809,11 +4898,9 @@ class TermForgeApp:
             entry = categories[category][command]
             cmd_type, _cmd, _options = parse_command_entry(entry)
 
-#            if cmd_type in (2, "send") and not getattr(self, "selected_window_id", None):
-#                raise TermForgeError(
-#                    f"Scheduled command requires a selected target window: {category}/{command}"
-#                )
             self.set_status(f"Running scheduled command: {category}/{command}")
+            self.log(f"Scheduled command queued: {category}/{command}")
+
             self.enqueue_command(category, command, source="schedule")
 
             schedule["_last_status"] = "success"
