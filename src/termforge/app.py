@@ -3396,6 +3396,15 @@ class ExecutionQueueWindow:
 
         Button(
             toolbar_bottom,
+            text="Run Selected Next",
+            width=18,
+            bg="#2f5597",
+            fg="white",
+            command=self.run_selected_next,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            toolbar_bottom,
             text="Clear Queue",
             width=14,
             bg="#7f0000",
@@ -3431,6 +3440,7 @@ class ExecutionQueueWindow:
         )
         self.listbox.pack(fill=BOTH, expand=True, pady=(0, 8))
 
+        self.listbox.bind("<Control-Return>", lambda _e: self.run_selected_next())
         self.listbox.bind("<Delete>", lambda _e: self.cancel_pending())
         self.listbox.bind("<Alt-Up>", lambda _e: self.move_pending_up())
         self.listbox.bind("<Alt-Down>", lambda _e: self.move_pending_down())
@@ -3510,10 +3520,12 @@ class ExecutionQueueWindow:
         
         completed_source = getattr(self.app, "completed_jobs", []) or self.app.get_execution_history()
 
-        for index, job in enumerate(self.app.execution_queue, start=1):
+        for index, job in enumerate(self.app.execution_queue):
+            prefix = "▶ " if index == 0 else "  "
+
             self.listbox.insert(
                 END,
-                f'{index}. [{job.get("source", "manual")}] '
+                f'{prefix}{index + 1}. [{job.get("source", "manual")}] '
                 f'{job.get("category")}/{job.get("command")} '
                 f'@ {job.get("created_at", "")}'
             )
@@ -3585,6 +3597,39 @@ class ExecutionQueueWindow:
         self.listbox.selection_clear(0, END)
         self.listbox.selection_set(index + 1)
         self.listbox.activate(index + 1)
+
+    def run_selected_next(self):
+        index = self.selected_pending_index()
+
+        if index is None:
+            messagebox.showerror(
+                "Execution Queue",
+                "Select a pending job first.",
+            )
+            return
+
+        queue = self.app.execution_queue
+
+        if index < 0 or index >= len(queue):
+            return
+
+        if index != 0:
+            selected = queue.pop(index)
+            queue.insert(0, selected)
+
+        self.app.set_status(
+            f"Prioritized queued job: "
+            f"{queue[0].get('category')}/{queue[0].get('command')}"
+        )
+
+        self.refresh()
+
+        self.listbox.selection_clear(0, END)
+        self.listbox.selection_set(0)
+        self.listbox.activate(0)
+
+        if not self.app.is_execution_queue_paused():
+            self.app.root.after(10, self.app.process_execution_queue)
 
     def clear_queue(self):
         if not messagebox.askokcancel(
