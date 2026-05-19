@@ -3339,6 +3339,24 @@ class ExecutionQueueWindow:
 
         Button(
             action_row,
+            text="Pause Queue",
+            width=14,
+            bg="#7f6000",
+            fg="white",
+            command=self.pause_queue,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Resume Queue",
+            width=14,
+            bg="darkgreen",
+            fg="white",
+            command=self.resume_queue,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
             text="Clear Queue",
             width=14,
             bg="#7f6000",
@@ -3409,21 +3427,26 @@ class ExecutionQueueWindow:
         running = getattr(self.app, "current_job", None)
         started_at = getattr(self.app, "current_job_started_at", None)
 
-        if running:
+        if self.app.is_execution_queue_paused():
+            running_text = "QUEUE: PAUSED"
+
+        elif running:
             duration = ""
             if started_at:
                 seconds = int((datetime.now() - started_at).total_seconds())
                 duration = f"{seconds}s"
 
             running_text = (
-                f"RUNNING: [{running.get('source', 'manual')}] "
+                f"QUEUE: RUNNING\n"
+                f"[{running.get('source', 'manual')}] "
                 f"{running.get('category')}/{running.get('command')}"
             )
 
             if duration:
                 running_text += f"\nDuration: {duration}"
+
         else:
-            running_text = "RUNNING: none"
+            running_text = "QUEUE: IDLE"
 
         self.info.delete("1.0", END)
         self.info.insert(
@@ -3457,6 +3480,14 @@ class ExecutionQueueWindow:
 
     def run_next(self):
         self.app.process_execution_queue()
+        self.refresh()
+
+    def pause_queue(self):
+        self.app.pause_execution_queue()
+        self.refresh()
+
+    def resume_queue(self):
+        self.app.resume_execution_queue()
         self.refresh()
 
     def clear_queue(self):
@@ -3499,6 +3530,7 @@ class TermForgeApp:
         self._last_backup_time = 0
         self.execution_queue = []
         self.execution_running = False
+        self.execution_queue_paused = False
         self.current_job = None
         self.current_job_started_at = None
         self.completed_jobs = []
@@ -3689,6 +3721,27 @@ class TermForgeApp:
         finally:
             self.root.destroy()
 
+    def is_execution_queue_paused(self) -> bool:
+        return bool(getattr(self, "execution_queue_paused", False))
+
+
+    def pause_execution_queue(self) -> None:
+        self.execution_queue_paused = True
+        self.set_status("Execution queue paused.")
+
+
+    def resume_execution_queue(self) -> None:
+        self.execution_queue_paused = False
+        self.set_status("Execution queue resumed.")
+        self.root.after(10, self.process_execution_queue)
+
+
+    def toggle_execution_queue_pause(self) -> None:
+        if self.is_execution_queue_paused():
+            self.resume_execution_queue()
+        else:
+            self.pause_execution_queue()
+
     def get_execution_history(self) -> list:
         history = getattr(self.cfg, "ExecutionHistory", [])
         if not isinstance(history, list):
@@ -3772,6 +3825,10 @@ class TermForgeApp:
 
 
     def process_execution_queue(self) -> None:
+        if self.is_execution_queue_paused():
+            self.set_status("Execution queue paused.")
+            return
+
         if self.execution_running:
             return
 
@@ -5483,6 +5540,10 @@ class TermForgeApp:
         tools_menu.add_separator()
         tools_menu.add_command(label="Tag Manager", command=self.open_tag_manager)
         tools_menu.add_command(label="Execution Queue", command=self.open_execution_queue)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Pause Execution Queue", command=self.pause_execution_queue)
+        tools_menu.add_command(label="Resume Execution Queue", command=self.resume_execution_queue)
+        tools_menu.add_command(label="Toggle Execution Queue Pause", command=self.toggle_execution_queue_pause)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         help_menu = Menu(menubar, tearoff=0)
