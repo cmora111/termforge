@@ -3300,7 +3300,7 @@ class ExecutionQueueWindow:
         self.app = app
         self.window = Toplevel(app.root)
         self.window.title("Execution Queue")
-        self.window.geometry("820x480")
+        self.window.geometry("800x720")
         self.window.transient(app.root)
 
         outer = Frame(self.window, padx=8, pady=8)
@@ -3316,11 +3316,11 @@ class ExecutionQueueWindow:
             relief="raised",
         ).pack(pady=(0, 8))
 
-        action_row = Frame(outer)
-        action_row.pack(fill=X, pady=(0, 8))
+        toolbar_top = Frame(outer)
+        toolbar_top.pack(fill=X, pady=(0, 4))
 
         Button(
-            action_row,
+            toolbar_top,
             text="Refresh",
             width=14,
             bg="navy",
@@ -3329,16 +3329,7 @@ class ExecutionQueueWindow:
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
-            action_row,
-            text="Run Next",
-            width=14,
-            bg="darkgreen",
-            fg="white",
-            command=self.run_next,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            action_row,
+            toolbar_top,
             text="Pause Queue",
             width=14,
             bg="#7f6000",
@@ -3347,7 +3338,7 @@ class ExecutionQueueWindow:
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
-            action_row,
+            toolbar_top,
             text="Resume Queue",
             width=14,
             bg="darkgreen",
@@ -3356,7 +3347,28 @@ class ExecutionQueueWindow:
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
-            action_row,
+            toolbar_top,
+            text="Run Next",
+            width=14,
+            bg="#2f5597",
+            fg="white",
+            command=self.run_next,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            toolbar_top,
+            text="Close",
+            width=14,
+            bg="red",
+            fg="black",
+            command=self.window.destroy,
+        ).pack(side=RIGHT)
+
+        toolbar_bottom = Frame(outer)
+        toolbar_bottom.pack(fill=X, pady=(0, 8))
+
+        Button(
+            toolbar_bottom,
             text="Cancel Pending",
             width=16,
             bg="#7f6000",
@@ -3365,25 +3377,34 @@ class ExecutionQueueWindow:
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
-            action_row,
+            toolbar_bottom,
+            text="Move Up",
+            width=14,
+            bg="#444488",
+            fg="white",
+            command=self.move_pending_up,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            toolbar_bottom,
+            text="Move Down",
+            width=14,
+            bg="#444488",
+            fg="white",
+            command=self.move_pending_down,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            toolbar_bottom,
             text="Clear Queue",
             width=14,
-            bg="#7f6000",
+            bg="#7f0000",
             fg="white",
             command=self.clear_queue,
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
-            action_row,
-            text="Close",
-            width=14,
-            bg="red",
-            fg="black",
-            command=self.window.destroy,
-        ).pack(side=RIGHT)
-
-        Button(
-            action_row,
+            toolbar_bottom,
             text="Clear Completed",
             width=16,
             bg="#555555",
@@ -3391,7 +3412,7 @@ class ExecutionQueueWindow:
             command=self.clear_completed,
         ).pack(side=LEFT, padx=(0, 6))
 
-        self.info = Text(outer, wrap="word", height=5)
+        self.info = Text(outer, wrap="word", height=8)
         self.info.pack(fill=X, pady=(0, 8))
 
         Label(
@@ -3402,10 +3423,17 @@ class ExecutionQueueWindow:
             fg="black",
         ).pack(fill=X)
 
-        self.listbox = Listbox(outer, width=90, height=10)
+        self.listbox = Listbox(
+            outer,
+            width=160,
+            height=12,
+            exportselection=False,
+        )
         self.listbox.pack(fill=BOTH, expand=True, pady=(0, 8))
 
         self.listbox.bind("<Delete>", lambda _e: self.cancel_pending())
+        self.listbox.bind("<Alt-Up>", lambda _e: self.move_pending_up())
+        self.listbox.bind("<Alt-Down>", lambda _e: self.move_pending_down())
 
         Label(
             outer,
@@ -3415,7 +3443,12 @@ class ExecutionQueueWindow:
             fg="black",
         ).pack(fill=X)
 
-        self.completed_listbox = Listbox(outer, width=90, height=8)
+        self.completed_listbox = Listbox(
+            outer,
+            width=160,
+            height=10,
+            exportselection=False,
+        )
         self.completed_listbox.pack(fill=BOTH, expand=True)
 
         self.refresh()
@@ -3512,6 +3545,46 @@ class ExecutionQueueWindow:
     def resume_queue(self):
         self.app.resume_execution_queue()
         self.refresh()
+
+    def move_pending_up(self):
+        index = self.selected_pending_index()
+
+        if index is None:
+            messagebox.showerror("Execution Queue", "Select a pending job first.")
+            return
+
+        if index <= 0:
+            return
+
+        queue = self.app.execution_queue
+        queue[index - 1], queue[index] = queue[index], queue[index - 1]
+
+        self.refresh()
+
+        self.listbox.selection_clear(0, END)
+        self.listbox.selection_set(index - 1)
+        self.listbox.activate(index - 1)
+
+
+    def move_pending_down(self):
+        index = self.selected_pending_index()
+
+        if index is None:
+            messagebox.showerror("Execution Queue", "Select a pending job first.")
+            return
+
+        queue = self.app.execution_queue
+
+        if index >= len(queue) - 1:
+            return
+
+        queue[index + 1], queue[index] = queue[index], queue[index + 1]
+
+        self.refresh()
+
+        self.listbox.selection_clear(0, END)
+        self.listbox.selection_set(index + 1)
+        self.listbox.activate(index + 1)
 
     def clear_queue(self):
         if not messagebox.askokcancel(
