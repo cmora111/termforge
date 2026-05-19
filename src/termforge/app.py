@@ -103,6 +103,7 @@ def ensure_user_config() -> None:
         "ScheduleHistory = []",
         "SchedulerPaused = False",
         "BackupDir = str(CONFIG_DIR / 'backups')",
+        "ExecutionHistory = []",
         "",
     ]
     backup_dir = Path(getattr(cfg, "BackupDir", CONFIG_DIR / "backups"))
@@ -3431,6 +3432,8 @@ class ExecutionQueueWindow:
             f"Pending jobs: {len(self.app.execution_queue)}\n"
             f"Completed jobs: {len(getattr(self.app, 'completed_jobs', []))}"
         )
+        
+        completed_source = getattr(self.app, "completed_jobs", []) or self.app.get_execution_history()
 
         for index, job in enumerate(self.app.execution_queue, start=1):
             self.listbox.insert(
@@ -3440,7 +3443,7 @@ class ExecutionQueueWindow:
                 f'@ {job.get("created_at", "")}'
             )
 
-        for index, job in enumerate(getattr(self.app, "completed_jobs", []), start=1):
+        for index, job in enumerate(completed_source, start=1):
             status = job.get("status", "?")
             error = job.get("error", "")
             suffix = f" — {error}" if error else ""
@@ -3449,7 +3452,7 @@ class ExecutionQueueWindow:
                 END,
                 f'{index}. [{status}] [{job.get("source", "manual")}] '
                 f'{job.get("category")}/{job.get("command")} '
-                f'@ {job.get("completed_at", "")}{suffix}'
+                f'@ {job.get("timestamp", job.get("completed_at", ""))}{suffix}'
             )
 
     def run_next(self):
@@ -3686,6 +3689,29 @@ class TermForgeApp:
         finally:
             self.root.destroy()
 
+    def get_execution_history(self) -> list:
+        history = getattr(self.cfg, "ExecutionHistory", [])
+        if not isinstance(history, list):
+            history = []
+            setattr(self.cfg, "ExecutionHistory", history)
+        return history
+
+
+    def add_execution_history(self, job: dict, status: str, error: str = "") -> None:
+        history = self.get_execution_history()
+
+        history.insert(0, {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "source": job.get("source", ""),
+            "category": job.get("category", ""),
+            "command": job.get("command", ""),
+            "status": status,
+            "error": error,
+        })
+
+        del history[200:]
+        self.persist_full_config()
+
     def get_config_path(self) -> Path:
         return CONFIG_FILE
 
@@ -3727,12 +3753,15 @@ class TermForgeApp:
 
     def enqueue_command(self, category: str, command: str, source: str = "manual",) -> None:
 
-        self.execution_queue.append({
+        job = {
             "category": category,
             "command": command,
             "source": source,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        })
+        }
+
+        self.execution_queue.append(job)
+        self.add_execution_history(job, "queued", "")
 
         self.set_status(
             f"Queued {category}/{command} "
@@ -3758,10 +3787,13 @@ class TermForgeApp:
         command = job["command"]
         source = job.get("source", "manual")
 
+        self.add_execution_history(job, "started", "")
+
         try:
             self.set_status(f"Running queued command: {category}/{command}")
             self.log(f"Queue running [{source}]: {category}/{command}")
             self.add_completed_job(job, "success", "")
+            self.add_execution_history(job, "success", "")
 
             # direct execution path
             self.select_cmd(None, category, command)
@@ -3771,6 +3803,7 @@ class TermForgeApp:
         except Exception as exc:
             self.log(f"Queue failed [{source}]: {category}/{command}: {exc}")
             self.add_completed_job(job, "failed", str(exc))
+            self.add_execution_history(job, "failed", str(exc))
 
             try:
                 self.show_traceback_window(
@@ -5283,6 +5316,7 @@ class TermForgeApp:
             schedule_history = getattr(self.cfg, "ScheduleHistory", [])
             scheduler_paused = getattr(self.cfg, "SchedulerPaused", False)
             categories = getattr(self.cfg, "Categories", {})
+            execution_history = getattr(self.cfg, "ExecutionHistory", [])
 
             lines = [
                 "# TermForge user configuration",
@@ -5302,6 +5336,7 @@ class TermForgeApp:
                 f"ScheduleHistory = {pprint.pformat(schedule_history, indent=4)}",
                 f"SchedulerPaused = {repr(bool(scheduler_paused))}",
                 f"Categories = {pprint.pformat(categories, indent=4)}",
+                f"ExecutionHistory = {pprint.pformat(execution_history, indent=4)}",
                 "",
             ]
             CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
