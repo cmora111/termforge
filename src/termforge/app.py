@@ -3357,6 +3357,15 @@ class ExecutionQueueWindow:
 
         Button(
             action_row,
+            text="Cancel Pending",
+            width=16,
+            bg="#7f6000",
+            fg="white",
+            command=self.cancel_pending,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
             text="Clear Queue",
             width=14,
             bg="#7f6000",
@@ -3396,6 +3405,8 @@ class ExecutionQueueWindow:
         self.listbox = Listbox(outer, width=90, height=10)
         self.listbox.pack(fill=BOTH, expand=True, pady=(0, 8))
 
+        self.listbox.bind("<Delete>", lambda _e: self.cancel_pending())
+
         Label(
             outer,
             text="Recent Completed Jobs",
@@ -3419,6 +3430,14 @@ class ExecutionQueueWindow:
             pass
 
     def refresh(self):
+        selected_index = None
+        try:
+            idxs = self.listbox.curselection()
+            if idxs:
+                selected_index = idxs[0]
+        except Exception:
+            pass
+
         self.listbox.delete(0, END)
 
         if hasattr(self, "completed_listbox"):
@@ -3466,6 +3485,10 @@ class ExecutionQueueWindow:
                 f'@ {job.get("created_at", "")}'
             )
 
+        if selected_index is not None and selected_index < self.listbox.size():
+            self.listbox.selection_set(selected_index)
+            self.listbox.activate(selected_index)
+
         for index, job in enumerate(completed_source, start=1):
             status = job.get("status", "?")
             error = job.get("error", "")
@@ -3504,6 +3527,52 @@ class ExecutionQueueWindow:
     def clear_completed(self):
         self.app.completed_jobs.clear()
         self.refresh()
+
+    def selected_pending_index(self):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return None
+
+        index = idxs[0]
+        if index < 0 or index >= len(self.app.execution_queue):
+            return None
+
+        return index
+
+
+    def cancel_pending(self):
+        index = self.selected_pending_index()
+
+        if index is None:
+            messagebox.showerror("Execution Queue", "Select a pending job first.")
+            return
+
+        job = self.app.execution_queue[index]
+
+        if not messagebox.askokcancel(
+            "Cancel Pending Job",
+            f"Cancel pending job?\n\n{job.get('category')}/{job.get('command')}",
+        ):
+            return
+
+        cancelled = self.app.execution_queue.pop(index)
+        self.app.add_completed_job(cancelled, "cancelled", "")
+        self.app.add_execution_history(cancelled, "cancelled", "")
+        self.app.set_status(
+            f"Cancelled pending job: {cancelled.get('category')}/{cancelled.get('command')}"
+        )
+        self.refresh()
+
+    def selected_pending_index(self):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return None
+
+        index = idxs[0]
+        if index < 0 or index >= len(self.app.execution_queue):
+            return None
+
+        return index
 
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
