@@ -40,6 +40,7 @@ from tkinter import (
     Toplevel,
     filedialog,
     messagebox,
+    PanedWindow,
 )
 
 APP_NAME = "TermForge"
@@ -3300,7 +3301,7 @@ class ExecutionQueueWindow:
         self.app = app
         self.window = Toplevel(app.root)
         self.window.title("Execution Queue")
-        self.window.geometry("800x720")
+        self.window.geometry("985x840")
         self.window.transient(app.root)
         self._selection_lock_until = 0
 
@@ -3358,6 +3359,15 @@ class ExecutionQueueWindow:
 
         Button(
             toolbar_top,
+            text="Run Selected Next",
+            width=18,
+            bg="#2f5597",
+            fg="white",
+            command=self.run_selected_next,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            toolbar_top,
             text="Close",
             width=14,
             bg="red",
@@ -3397,15 +3407,6 @@ class ExecutionQueueWindow:
 
         Button(
             toolbar_bottom,
-            text="Run Selected Next",
-            width=18,
-            bg="#2f5597",
-            fg="white",
-            command=self.run_selected_next,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            toolbar_bottom,
             text="Retry Failed",
             width=14,
             bg="#2f5597",
@@ -3431,11 +3432,27 @@ class ExecutionQueueWindow:
             command=self.clear_completed,
         ).pack(side=LEFT, padx=(0, 6))
 
-        self.info = Text(outer, wrap="word", height=8)
+        self.info = Text(outer, wrap="word", height=5)
         self.info.pack(fill=X, pady=(0, 8))
 
-        Label(
+        main_pane = PanedWindow(
             outer,
+            orient="vertical",
+            sashrelief="raised",
+        )
+        main_pane.pack(fill=BOTH, expand=True)
+
+        lists_pane = PanedWindow(
+            main_pane,
+            orient="horizontal",
+            sashrelief="raised",
+        )
+
+        pending_frame = Frame(lists_pane, padx=4, pady=4)
+        completed_frame = Frame(lists_pane, padx=4, pady=4)
+
+        Label(
+            pending_frame,
             text="Pending Jobs",
             anchor="w",
             bg="#dddddd",
@@ -3443,21 +3460,19 @@ class ExecutionQueueWindow:
         ).pack(fill=X)
 
         self.listbox = Listbox(
-            outer,
-            width=160,
+            pending_frame,
+            width=50,
             height=12,
             exportselection=False,
         )
-        self.listbox.pack(fill=BOTH, expand=True, pady=(0, 8))
+        self.listbox.pack(side=LEFT, fill=BOTH, expand=True)
 
-        self.listbox.bind("<<ListboxSelect>>", self.lock_selection)
-        self.listbox.bind("<Control-Return>", lambda _e: self.run_selected_next())
-        self.listbox.bind("<Delete>", lambda _e: self.cancel_pending())
-        self.listbox.bind("<Alt-Up>", lambda _e: self.move_pending_up())
-        self.listbox.bind("<Alt-Down>", lambda _e: self.move_pending_down())
+        pending_scrollbar = Scrollbar(pending_frame, command=self.listbox.yview)
+        pending_scrollbar.pack(side=RIGHT, fill=Y)
+        self.listbox.config(yscrollcommand=pending_scrollbar.set)
 
         Label(
-            outer,
+            completed_frame,
             text="Recent Completed Jobs",
             anchor="w",
             bg="#dddddd",
@@ -3465,31 +3480,55 @@ class ExecutionQueueWindow:
         ).pack(fill=X)
 
         self.completed_listbox = Listbox(
-            outer,
-            width=160,
-            height=10,
+            completed_frame,
+            width=92,
+            height=12,
             exportselection=False,
         )
-        self.completed_listbox.pack(fill=BOTH, expand=True)
-        self.completed_listbox.bind("<<ListboxSelect>>", self.lock_selection)
+        self.completed_listbox.pack(side=LEFT, fill=BOTH, expand=True)
+
+        completed_scrollbar = Scrollbar(
+            completed_frame,
+            command=self.completed_listbox.yview,
+        )
+        completed_scrollbar.pack(side=RIGHT, fill=Y)
+        self.completed_listbox.config(yscrollcommand=completed_scrollbar.set)
+
+        lists_pane.add(pending_frame)
+        lists_pane.add(completed_frame)
+
+        lists_pane.paneconfigure(pending_frame, minsize=300)
+        lists_pane.paneconfigure(completed_frame, minsize=460)
+
+        details_frame = Frame(main_pane, padx=4, pady=4)
 
         Label(
-            outer,
+            details_frame,
             text="Job Details",
             anchor="w",
             bg="#dddddd",
             fg="black",
-        ).pack(fill=X, pady=(8, 0))
+        ).pack(fill=X)
 
         self.details = Text(
-            outer,
+            details_frame,
             wrap="word",
             height=8,
         )
         self.details.pack(fill=BOTH, expand=True)
 
+        main_pane.add(lists_pane)
+        main_pane.add(details_frame)
+
         self.listbox.bind("<<ListboxSelect>>", self.show_pending_details)
         self.completed_listbox.bind("<<ListboxSelect>>", self.show_completed_details)
+
+        self.listbox.bind("<Control-Return>", lambda _e: self.run_selected_next())
+        self.listbox.bind("<Delete>", lambda _e: self.cancel_pending())
+        self.listbox.bind("<Alt-Up>", lambda _e: self.move_pending_up())
+        self.listbox.bind("<Alt-Down>", lambda _e: self.move_pending_down())
+
+        self.completed_listbox.bind("<Control-Return>", lambda _e: self.retry_failed_job())
 
         self.refresh()
         self.auto_refresh()
