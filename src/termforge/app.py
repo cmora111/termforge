@@ -3302,6 +3302,7 @@ class ExecutionQueueWindow:
         self.window.title("Execution Queue")
         self.window.geometry("800x720")
         self.window.transient(app.root)
+        self._selection_lock_until = 0
 
         outer = Frame(self.window, padx=8, pady=8)
         outer.pack(fill=BOTH, expand=True)
@@ -3405,6 +3406,15 @@ class ExecutionQueueWindow:
 
         Button(
             toolbar_bottom,
+            text="Retry Failed",
+            width=14,
+            bg="#2f5597",
+            fg="white",
+            command=self.retry_failed_job,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            toolbar_bottom,
             text="Clear Queue",
             width=14,
             bg="#7f0000",
@@ -3440,6 +3450,7 @@ class ExecutionQueueWindow:
         )
         self.listbox.pack(fill=BOTH, expand=True, pady=(0, 8))
 
+        self.listbox.bind("<<ListboxSelect>>", self.lock_selection)
         self.listbox.bind("<Control-Return>", lambda _e: self.run_selected_next())
         self.listbox.bind("<Delete>", lambda _e: self.cancel_pending())
         self.listbox.bind("<Alt-Up>", lambda _e: self.move_pending_up())
@@ -3460,6 +3471,7 @@ class ExecutionQueueWindow:
             exportselection=False,
         )
         self.completed_listbox.pack(fill=BOTH, expand=True)
+        self.completed_listbox.bind("<<ListboxSelect>>", self.lock_selection)
 
         self.refresh()
         self.auto_refresh()
@@ -3467,17 +3479,28 @@ class ExecutionQueueWindow:
     def auto_refresh(self):
         try:
             if self.window.winfo_exists():
-                self.refresh()
+                if time.time() >= getattr(self, "_selection_lock_until", 0):
+                    self.refresh()
                 self.window.after(1000, self.auto_refresh)
         except Exception:
             pass
 
     def refresh(self):
-        selected_index = None
+        selected_pending_index = None
+        selected_completed_index = None
+
         try:
             idxs = self.listbox.curselection()
             if idxs:
-                selected_index = idxs[0]
+                selected_pending_index = idxs[0]
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, "completed_listbox"):
+                idxs = self.completed_listbox.curselection()
+                if idxs:
+                    selected_completed_index = idxs[0]
         except Exception:
             pass
 
@@ -3486,43 +3509,12 @@ class ExecutionQueueWindow:
         if hasattr(self, "completed_listbox"):
             self.completed_listbox.delete(0, END)
 
-        running = getattr(self.app, "current_job", None)
-        started_at = getattr(self.app, "current_job_started_at", None)
+        completed_source = self.app.get_execution_history()
 
-        if self.app.is_execution_queue_paused():
-            running_text = "QUEUE: PAUSED"
-
-        elif running:
-            duration = ""
-            if started_at:
-                seconds = int((datetime.now() - started_at).total_seconds())
-                duration = f"{seconds}s"
-
-            running_text = (
-                f"QUEUE: RUNNING\n"
-                f"[{running.get('source', 'manual')}] "
-                f"{running.get('category')}/{running.get('command')}"
-            )
-
-            if duration:
-                running_text += f"\nDuration: {duration}"
-
-        else:
-            running_text = "QUEUE: IDLE"
-
-        self.info.delete("1.0", END)
-        self.info.insert(
-            "1.0",
-            f"{running_text}\n\n"
-            f"Pending jobs: {len(self.app.execution_queue)}\n"
-            f"Completed jobs: {len(getattr(self.app, 'completed_jobs', []))}"
-        )
-        
-        completed_source = getattr(self.app, "completed_jobs", []) or self.app.get_execution_history()
+        # existing running_text logic goes here
 
         for index, job in enumerate(self.app.execution_queue):
             prefix = "▶ " if index == 0 else "  "
-
             self.listbox.insert(
                 END,
                 f'{prefix}{index + 1}. [{job.get("source", "manual")}] '
@@ -3530,21 +3522,29 @@ class ExecutionQueueWindow:
                 f'@ {job.get("created_at", "")}'
             )
 
-        if selected_index is not None and selected_index < self.listbox.size():
-            self.listbox.selection_set(selected_index)
-            self.listbox.activate(selected_index)
+        if selected_pending_index is not None and selected_pending_index < self.listbox.size():
+            self.listbox.selection_set(selected_pending_index)
+            self.listbox.activate(selected_pending_index)
 
-        for index, job in enumerate(completed_source, start=1):
-            status = job.get("status", "?")
-            error = job.get("error", "")
-            suffix = f" — {error}" if error else ""
+        if hasattr(self, "completed_listbox"):
+            for index, job in enumerate(completed_source, start=1):
+                status = job.get("status", "?")
+                error = job.get("error", "")
+                suffix = f" — {error}" if error else ""
 
-            self.completed_listbox.insert(
-                END,
-                f'{index}. [{status}] [{job.get("source", "manual")}] '
-                f'{job.get("category")}/{job.get("command")} '
-                f'@ {job.get("timestamp", job.get("completed_at", ""))}{suffix}'
-            )
+                self.completed_listbox.insert(
+                    END,
+                    f'{index}. [{status}] [{job.get("source", "manual")}] '
+                    f'{job.get("category")}/{job.get("command")} '
+                    f'@ {job.get("timestamp", job.get("completed_at", ""))}{suffix}'
+                )
+
+            if (
+                selected_completed_index is not None
+                and selected_completed_index < self.completed_listbox.size()
+            ):
+                self.completed_listbox.selection_set(selected_completed_index)
+                self.completed_listbox.activate(selected_completed_index)
 
     def run_next(self):
         self.app.process_execution_queue()
@@ -3630,6 +3630,53 @@ class ExecutionQueueWindow:
 
         if not self.app.is_execution_queue_paused():
             self.app.root.after(10, self.app.process_execution_queue)
+
+    def lock_selection(self, _event=None):
+        self._selection_lock_until = time.time() + 3
+
+    def retry_failed_job(self):
+        job = self.selected_completed_job()
+
+        if not job:
+            messagebox.showerror(
+                "Execution Queue",
+                "Select a failed job from Recent Completed Jobs first.",
+            )
+            return
+
+        if job.get("status") not in ("failed", "cancelled"):
+            messagebox.showerror(
+                "Execution Queue",
+                "Only failed or cancelled jobs can be retried.",
+            )
+            return
+
+        category = job.get("category")
+        command = job.get("command")
+
+        if not category or not command:
+            messagebox.showerror(
+                "Execution Queue",
+                "Selected history entry does not contain a category/command.",
+            )
+            return
+
+        self.app.enqueue_command(category, command, source="retry")
+        self.app.set_status(f"Retried failed job: {category}/{command}")
+        self.refresh()
+
+    def selected_completed_job(self):
+        idxs = self.completed_listbox.curselection()
+        if not idxs:
+            return None
+
+        history = self.app.get_execution_history()
+        index = idxs[0]
+
+        if index < 0 or index >= len(history):
+            return None
+
+        return history[index]
 
     def clear_queue(self):
         if not messagebox.askokcancel(
