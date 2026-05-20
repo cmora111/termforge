@@ -3473,6 +3473,24 @@ class ExecutionQueueWindow:
         self.completed_listbox.pack(fill=BOTH, expand=True)
         self.completed_listbox.bind("<<ListboxSelect>>", self.lock_selection)
 
+        Label(
+            outer,
+            text="Job Details",
+            anchor="w",
+            bg="#dddddd",
+            fg="black",
+        ).pack(fill=X, pady=(8, 0))
+
+        self.details = Text(
+            outer,
+            wrap="word",
+            height=8,
+        )
+        self.details.pack(fill=BOTH, expand=True)
+
+        self.listbox.bind("<<ListboxSelect>>", self.show_pending_details)
+        self.completed_listbox.bind("<<ListboxSelect>>", self.show_completed_details)
+
         self.refresh()
         self.auto_refresh()
 
@@ -3545,6 +3563,10 @@ class ExecutionQueueWindow:
             ):
                 self.completed_listbox.selection_set(selected_completed_index)
                 self.completed_listbox.activate(selected_completed_index)
+        if hasattr(self, "details"):
+            if not self.listbox.curselection() and not self.completed_listbox.curselection():
+                self.details.delete("1.0", END)
+                self.details.insert("1.0", "Select a pending or completed job to view details.")
 
     def run_next(self):
         self.app.process_execution_queue()
@@ -3634,6 +3656,70 @@ class ExecutionQueueWindow:
     def lock_selection(self, _event=None):
         self._selection_lock_until = time.time() + 3
 
+    def show_job_details(self, job: dict, title: str = "Job Details") -> None:
+        if not hasattr(self, "details"):
+            return
+
+        lines = [
+            title,
+            "",
+            f"Source: {job.get('source', '')}",
+            f"Category: {job.get('category', '')}",
+            f"Command: {job.get('command', '')}",
+            f"Status: {job.get('status', '')}",
+            f"Created: {job.get('created_at', '')}",
+            f"Timestamp: {job.get('timestamp', '')}",
+            f"Completed: {job.get('completed_at', '')}",
+            "",
+        ]
+
+        error = job.get("error", "")
+        if error:
+            lines.extend([
+                "Error:",
+                str(error),
+                "",
+            ])
+
+        lines.extend([
+            "Raw:",
+            pprint.pformat(job, indent=4),
+        ])
+
+        self.details.delete("1.0", END)
+        self.details.insert("1.0", "\n".join(lines))
+
+
+    def show_pending_details(self, _event=None):
+        self.lock_selection()
+
+        index = self.selected_pending_index()
+        if index is None:
+            return
+
+        if index < 0 or index >= len(self.app.execution_queue):
+            return
+
+        job = self.app.execution_queue[index]
+        self.show_job_details(job, "Pending Job")
+
+
+    def show_completed_details(self, _event=None):
+        self.lock_selection()
+
+        idxs = self.completed_listbox.curselection()
+        if not idxs:
+            return
+
+        history = self.app.get_execution_history()
+        index = idxs[0]
+
+        if index < 0 or index >= len(history):
+            return
+
+        job = history[index]
+        self.show_job_details(job, "Completed Job")
+
     def retry_failed_job(self):
         job = self.selected_completed_job()
 
@@ -3687,10 +3773,14 @@ class ExecutionQueueWindow:
 
         self.app.execution_queue.clear()
         self.app.set_status("Execution queue cleared.")
+        if hasattr(self, "details"):
+            self.details.delete("1.0", END)
         self.refresh()
 
     def clear_completed(self):
         self.app.completed_jobs.clear()
+        if hasattr(self, "details"):
+            self.details.delete("1.0", END)
         self.refresh()
 
     def selected_pending_index(self):
