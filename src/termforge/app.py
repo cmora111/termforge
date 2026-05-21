@@ -4134,6 +4134,7 @@ class ProfileManagerWindow:
         Button(action_row, text="Test Profile", width=14, bg="navy", fg="white", command=self.test_profile).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Delete", width=14, bg="#7f6000", fg="white", command=self.delete_profile).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Refresh", width=14, bg="#555555", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Validate All", width=14, bg="#555577", fg="white", command=self.validate_all,).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
 
         body = Frame(outer)
@@ -4190,8 +4191,15 @@ class ProfileManagerWindow:
                     "window_id": window_id,
                     "legacy_format": True,
                 }
-            self.snapshot.append((name, profile))
-            self.listbox.insert(END, f"{name} -> {window_id}")
+
+            validation = self.app.validate_window_profile(name)
+            status = validation.get("status", "unknown").upper()
+
+            self.snapshot.append((name, profile, validation))
+            self.listbox.insert(
+                END,
+                f"[{status}] {name} -> {window_id}",
+            )
 
         self.info.delete("1.0", END)
         self.info.insert(
@@ -4200,6 +4208,23 @@ class ProfileManagerWindow:
             "Use this with chain steps like:\n"
             "[\"select_profile\", \"server\"]"
         )
+
+    def validate_all(self):
+        results = self.app.validate_all_window_profiles()
+
+        valid = sum(1 for item in results if item.get("valid"))
+        stale = sum(1 for item in results if not item.get("valid"))
+
+        self.info.delete("1.0", END)
+        self.info.insert(
+            "1.0",
+            f"Profile Validation\n\n"
+            f"Valid: {valid}\n"
+            f"Stale/Missing: {stale}\n\n"
+            f"{pprint.pformat(results, indent=4)}"
+        )
+
+        self.refresh()
 
     def selected_profile_name(self):
         idxs = self.listbox.curselection()
@@ -4212,12 +4237,28 @@ class ProfileManagerWindow:
         if not idxs:
             return
 
-        name, profile = self.snapshot[idxs[0]]
+        row = self.snapshot[idxs[0]]
+
+        if len(row) == 3:
+            name, profile, validation = row
+        else:
+            name, profile = row
+            validation = self.app.validate_window_profile(name)
+
         self.name_var.set(name)
         self.window_id_var.set(str(profile.get("window_id", "")))
 
         self.info.delete("1.0", END)
-        self.info.insert("1.0", pprint.pformat(profile, indent=4))
+        self.info.insert(
+            "1.0",
+            pprint.pformat(
+                {
+                    "profile": profile,
+                    "validation": validation,
+                },
+                indent=4,
+            ),
+        )
 
     def save_current(self):
         name = self.name_var.get().strip()
@@ -4609,6 +4650,61 @@ class TermForgeApp:
         finally:
             self.root.destroy()
 
+    def window_exists(self, window_id) -> bool:
+        if not window_id:
+            return False
+
+        try:
+            result = subprocess.run(
+                ["xdotool", "getwindowname", str(window_id)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=2,
+            )
+
+            return result.returncode == 0
+
+        except Exception:
+            return False
+
+
+    def validate_window_profile(self, profile_name: str) -> dict:
+        profiles = self.get_window_profiles()
+        profile = profiles.get(profile_name)
+
+        if profile is None:
+            return {
+                "name": profile_name,
+                "valid": False,
+                "window_id": "",
+                "status": "missing",
+                "message": "Profile does not exist.",
+            }
+
+        if isinstance(profile, dict):
+            window_id = profile.get("window_id")
+        else:
+            window_id = profile
+
+        exists = self.window_exists(window_id)
+
+        return {
+            "name": profile_name,
+            "valid": exists,
+            "window_id": window_id,
+            "status": "valid" if exists else "stale",
+            "message": "Window exists." if exists else "Window is not available.",
+        }
+
+
+    def validate_all_window_profiles(self) -> list[dict]:
+        profiles = self.get_window_profiles()
+        return [
+            self.validate_window_profile(name)
+            for name in sorted(profiles.keys())
+        ]
+
     def open_config_health_check(self) -> None:
         ConfigHealthCheckWindow(self)
 
@@ -4765,6 +4861,14 @@ class TermForgeApp:
                     "Profiles",
                     f"Profile has no window_id: {name}",
                 )
+
+        if window_id and not self.window_exists(window_id):
+            add_issue(
+                "warning",
+                "Profiles",
+                f"Profile window is stale/unavailable: {name}",
+                f"window_id={window_id}",
+            )
 
         if not isinstance(tags, dict):
             add_issue("warning", "Tags", "Tags should be a dictionary.")
