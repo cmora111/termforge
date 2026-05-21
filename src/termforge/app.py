@@ -60,6 +60,18 @@ PLACEHOLDER_RE = re.compile(r"<([^<>]+)>")
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
 
+APP_NAME = "TermForge"
+APP_VERSION = "0.3.4"
+PLUGIN_API_VERSION = 1
+MAX_HISTORY = 30
+
+PRIORITY_ORDER = {
+    "critical": 0,
+    "high": 1,
+    "normal": 2,
+    "low": 3,
+}
+
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
@@ -605,6 +617,7 @@ class PluginManagerWindow:
         self.info.insert("1.0", "\n".join(lines))
 
     def run_selected(self):
+        queue[0]["priority"] = "critical"
         item = self.selected_item()
 
         if not item:
@@ -3306,6 +3319,13 @@ class ExecutionQueueWindow:
         self.window.transient(app.root)
         self._selection_lock_until = 0
 
+        PRIORITY_ORDER = {
+            "critical": 0,
+            "high": 1,
+            "normal": 2,
+            "low": 3,
+        }
+
         outer = Frame(self.window, padx=8, pady=8)
         outer.pack(fill=BOTH, expand=True)
 
@@ -3422,6 +3442,24 @@ class ExecutionQueueWindow:
             bg="#7f0000",
             fg="white",
             command=self.clear_queue,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            toolbar_bottom,
+            text="Priority High",
+            width=14,
+            bg="#2f5597",
+            fg="white",
+            command=lambda: self.set_selected_priority("high"),
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            toolbar_bottom,
+            text="Priority Low",
+            width=14,
+            bg="#555555",
+            fg="white",
+            command=lambda: self.set_selected_priority("low"),
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
@@ -3619,9 +3657,10 @@ class ExecutionQueueWindow:
 
         for index, job in enumerate(self.app.execution_queue):
             prefix = "▶ " if index == 0 else "  "
+            priority = job.get("priority", "normal")
             self.listbox.insert(
                 END,
-                f'{prefix}{index + 1}. [{job.get("source", "manual")}] '
+                f'{prefix}{index + 1}. [{priority}] [{job.get("source", "manual")}] '
                 f'{job.get("category")}/{job.get("command")} '
                 f'@ {job.get("created_at", "")}'
             )
@@ -3739,6 +3778,27 @@ class ExecutionQueueWindow:
         if not self.app.is_execution_queue_paused():
             self.app.root.after(10, self.app.process_execution_queue)
 
+    def set_selected_priority(self, priority: str):
+        index = self.selected_pending_index()
+
+        if index is None:
+            messagebox.showerror("Execution Queue", "Select a pending job first.")
+            return
+
+        if priority not in PRIORITY_ORDER:
+            priority = "normal"
+
+        self.app.execution_queue[index]["priority"] = priority
+        self.app.set_status(
+            f"Set priority {priority}: "
+            f"{self.app.execution_queue[index].get('category')}/"
+            f"{self.app.execution_queue[index].get('command')}"
+        )
+
+        self.refresh()
+        self.listbox.selection_set(index)
+        self.listbox.activate(index)
+
     def filtered_completed_history(self):
         history = self.app.get_execution_history()
 
@@ -3792,6 +3852,7 @@ class ExecutionQueueWindow:
             f"Category: {job.get('category', '')}",
             f"Command: {job.get('command', '')}",
             f"Status: {job.get('status', '')}",
+            f"Priority: {job.get('priority', 'normal')}",
             f"Created: {job.get('created_at', '')}",
             f"Timestamp: {job.get('timestamp', '')}",
             f"Completed: {job.get('completed_at', '')}",
@@ -3871,7 +3932,7 @@ class ExecutionQueueWindow:
             )
             return
 
-        self.app.enqueue_command(category, command, source="retry")
+        self.app.enqueue_command(category, command, source="retry", priority="high")
         self.app.set_status(f"Retried failed job: {category}/{command}")
         self.refresh()
 
@@ -4206,6 +4267,7 @@ class TermForgeApp:
             "source": job.get("source", ""),
             "category": job.get("category", ""),
             "command": job.get("command", ""),
+            "priority": job.get("priority", "normal"),
             "status": status,
             "error": error,
         })
@@ -4252,12 +4314,19 @@ class TermForgeApp:
     def toggle_scheduler(self) -> None:
         self.set_scheduler_paused(not self.is_scheduler_paused())
 
-    def enqueue_command(self, category: str, command: str, source: str = "manual",) -> None:
+    def enqueue_command(
+            self,
+            category: str,
+            command: str,
+            source: str = "manual",
+            priority: str = "normal",
+            ) -> None:
 
         job = {
             "category": category,
             "command": command,
             "source": source,
+            "priority": priority if priority in PRIORITY_ORDER else "normal",
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
@@ -4283,6 +4352,9 @@ class TermForgeApp:
         if not self.execution_queue:
             return
 
+        self.execution_queue.sort(
+            key=lambda job: PRIORITY_ORDER.get(job.get("priority", "normal"), 2)
+        )
         job = self.execution_queue.pop(0)
         self.execution_running = True
         self.current_job = job
