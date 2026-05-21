@@ -4284,6 +4284,113 @@ class ProfileManagerWindow:
         self.window_id_var.set("")
         self.refresh()
 
+class ConfigHealthCheckWindow:
+    def __init__(self, app):
+        self.app = app
+        self.window = Toplevel(app.root)
+        self.window.title("Config Health Check")
+        self.window.geometry("980x620")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Config Health Check",
+            bd=4,
+            width=32,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(
+            action_row,
+            text="Run Check",
+            width=14,
+            bg="navy",
+            fg="white",
+            command=self.refresh,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Copy Report",
+            width=14,
+            bg="#2f5597",
+            fg="white",
+            command=self.copy_report,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Close",
+            width=14,
+            bg="red",
+            fg="black",
+            command=self.window.destroy,
+        ).pack(side=RIGHT)
+
+        self.listbox = Listbox(outer, width=120, height=18, exportselection=False)
+        self.listbox.pack(fill=BOTH, expand=True)
+
+        self.details = Text(outer, wrap="word", height=12)
+        self.details.pack(fill=BOTH, expand=True, pady=(8, 0))
+
+        self.snapshot = []
+        self.listbox.bind("<<ListboxSelect>>", self.on_select)
+
+        self.refresh()
+
+    def refresh(self):
+        self.snapshot = self.app.check_config_health()
+        self.listbox.delete(0, END)
+        self.details.delete("1.0", END)
+
+        counts = {}
+
+        for issue in self.snapshot:
+            counts[issue["level"]] = counts.get(issue["level"], 0) + 1
+            self.listbox.insert(
+                END,
+                f'[{issue["level"].upper()}] '
+                f'{issue["area"]}: {issue["message"]}'
+            )
+
+        summary = "Config Health Summary\n\n"
+        summary += "\n".join(
+            f"{level}: {count}"
+            for level, count in sorted(counts.items())
+        )
+
+        self.details.insert("1.0", summary)
+
+    def on_select(self, _event=None):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return
+
+        issue = self.snapshot[idxs[0]]
+
+        self.details.delete("1.0", END)
+        self.details.insert(
+            "1.0",
+            pprint.pformat(issue, indent=4),
+        )
+
+    def copy_report(self):
+        report = pprint.pformat(self.snapshot, indent=4)
+
+        self.window.clipboard_clear()
+        self.window.clipboard_append(report)
+        self.window.update()
+
+        messagebox.showinfo("Config Health Check", "Report copied to clipboard.")
+
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
         self.root = root
@@ -4501,6 +4608,242 @@ class TermForgeApp:
             self.root.quit()
         finally:
             self.root.destroy()
+
+    def open_config_health_check(self) -> None:
+        ConfigHealthCheckWindow(self)
+
+    def check_config_health(self) -> list[dict]:
+        issues = []
+
+        def add_issue(level: str, area: str, message: str, detail: str = ""):
+            issues.append({
+                "level": level,
+                "area": area,
+                "message": message,
+                "detail": detail,
+            })
+
+        categories = getattr(self.cfg, "Categories", {})
+        schedules = getattr(self.cfg, "Schedules", [])
+        windows = getattr(self.cfg, "Windows", {})
+        tags = getattr(self.cfg, "Tags", {})
+        hotkeys = getattr(self.cfg, "Hotkeys", {})
+        favorites = getattr(self.cfg, "Favorites", [])
+        disabled_plugins = getattr(self.cfg, "DisabledPlugins", [])
+
+        if not isinstance(categories, dict):
+            add_issue("error", "Categories", "Categories must be a dictionary.")
+            categories = {}
+
+        for category, commands in categories.items():
+            if not isinstance(commands, dict):
+                add_issue(
+                    "error",
+                    "Categories",
+                    f"Category is not a dictionary: {category}",
+                )
+                continue
+
+            for name, entry in commands.items():
+                try:
+                    cmd_type, cmd, options = parse_command_entry(entry)
+
+                    if options is not None and not isinstance(options, dict):
+                        add_issue(
+                            "warning",
+                            "Categories",
+                            f"Options should be a dictionary: {category}/{name}",
+                        )
+
+                    if cmd_type == "chain":
+                        if not isinstance(cmd, list):
+                            add_issue(
+                                "error",
+                                "Chains",
+                                f"Chain command is not a list: {category}/{name}",
+                            )
+                        else:
+                            for index, step in enumerate(cmd, start=1):
+                                if not isinstance(step, (list, tuple)) or not step:
+                                    add_issue(
+                                        "error",
+                                        "Chains",
+                                        f"Invalid chain step {index}: {category}/{name}",
+                                        repr(step),
+                                    )
+
+                except Exception as exc:
+                    add_issue(
+                        "error",
+                        "Categories",
+                        f"Invalid command entry: {category}/{name}",
+                        str(exc),
+                    )
+
+        if not isinstance(schedules, list):
+            add_issue("error", "Schedules", "Schedules must be a list.")
+            schedules = []
+
+        for index, schedule in enumerate(schedules, start=1):
+            if not isinstance(schedule, dict):
+                add_issue(
+                    "error",
+                    "Schedules",
+                    f"Schedule #{index} is not a dictionary.",
+                    repr(schedule),
+                )
+                continue
+
+            category = schedule.get("category", "")
+            command = schedule.get("command", "")
+            schedule_type = schedule.get("type", "")
+
+            if not category or not command:
+                add_issue(
+                    "error",
+                    "Schedules",
+                    f"Schedule missing category/command: {schedule.get('name', index)}",
+                )
+            elif category not in categories:
+                add_issue(
+                    "error",
+                    "Schedules",
+                    f"Schedule references missing category: {category}",
+                    pprint.pformat(schedule),
+                )
+            elif command not in categories.get(category, {}):
+                add_issue(
+                    "error",
+                    "Schedules",
+                    f"Schedule references missing command: {category}/{command}",
+                    pprint.pformat(schedule),
+                )
+
+            if schedule_type not in ("startup", "daily", "interval_minutes"):
+                add_issue(
+                    "warning",
+                    "Schedules",
+                    f"Unknown schedule type: {schedule_type}",
+                    pprint.pformat(schedule),
+                )
+
+            if schedule_type == "daily":
+                time_value = str(schedule.get("time", ""))
+                if not re.match(r"^\d{2}:\d{2}$", time_value):
+                    add_issue(
+                        "error",
+                        "Schedules",
+                        f"Daily schedule has invalid time: {time_value}",
+                    )
+
+            if schedule_type == "interval_minutes":
+                try:
+                    minutes = int(schedule.get("minutes", 0))
+                    if minutes <= 0:
+                        raise ValueError
+                except Exception:
+                    add_issue(
+                        "error",
+                        "Schedules",
+                        "Interval schedule minutes must be greater than zero.",
+                        pprint.pformat(schedule),
+                    )
+
+        if not isinstance(windows, dict):
+            add_issue("error", "Profiles", "Windows/profiles must be a dictionary.")
+            windows = {}
+
+        for name, profile in windows.items():
+            if isinstance(profile, dict):
+                window_id = profile.get("window_id")
+            else:
+                window_id = profile
+
+            if not window_id:
+                add_issue(
+                    "warning",
+                    "Profiles",
+                    f"Profile has no window_id: {name}",
+                )
+
+        if not isinstance(tags, dict):
+            add_issue("warning", "Tags", "Tags should be a dictionary.")
+            tags = {}
+
+        for key, value in tags.items():
+            if "/" not in key:
+                add_issue("warning", "Tags", f"Tag key should be category/command: {key}")
+                continue
+
+            category, command = key.split("/", 1)
+
+            if category not in categories or command not in categories.get(category, {}):
+                add_issue(
+                    "warning",
+                    "Tags",
+                    f"Tags reference missing command: {key}",
+                )
+
+            if not isinstance(value, list):
+                add_issue(
+                    "warning",
+                    "Tags",
+                    f"Tags should be a list: {key}",
+                )
+
+        if not isinstance(hotkeys, dict):
+            add_issue("warning", "Hotkeys", "Hotkeys should be a dictionary.")
+            hotkeys = {}
+
+        for hotkey, target in hotkeys.items():
+            try:
+                category, command = self._normalize_hotkey_target(target)
+                if category not in categories or command not in categories.get(category, {}):
+                    add_issue(
+                        "warning",
+                        "Hotkeys",
+                        f"Hotkey references missing command: {hotkey} -> {category}/{command}",
+                    )
+            except Exception as exc:
+                add_issue(
+                    "warning",
+                    "Hotkeys",
+                    f"Invalid hotkey target: {hotkey}",
+                    str(exc),
+                )
+
+        if not isinstance(favorites, list):
+            add_issue("warning", "Favorites", "Favorites should be a list.")
+            favorites = []
+
+        for item in favorites:
+            try:
+                category, command = item
+                if category not in categories or command not in categories.get(category, {}):
+                    add_issue(
+                        "warning",
+                        "Favorites",
+                        f"Favorite references missing command: {category}/{command}",
+                    )
+            except Exception:
+                add_issue(
+                    "warning",
+                    "Favorites",
+                    "Invalid favorite entry.",
+                    repr(item),
+                )
+
+        if not isinstance(disabled_plugins, list):
+            add_issue(
+                "warning",
+                "Plugins",
+                "DisabledPlugins should be a list.",
+            )
+
+        if not issues:
+            add_issue("ok", "Config", "No issues found.")
+
+        return issues
 
     def open_profile_manager(self) -> None:
         ProfileManagerWindow(self)
@@ -6479,6 +6822,8 @@ class TermForgeApp:
         tools_menu.add_command(label="Pause Execution Queue", command=self.pause_execution_queue)
         tools_menu.add_command(label="Resume Execution Queue", command=self.resume_execution_queue)
         tools_menu.add_command(label="Toggle Execution Queue Pause", command=self.toggle_execution_queue_pause)
+        tools_menu.add_command(label="Config Health Check", command=self.open_config_health_check,)
+
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         help_menu = Menu(menubar, tearoff=0)
