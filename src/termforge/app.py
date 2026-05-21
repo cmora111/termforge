@@ -37,6 +37,7 @@ from tkinter import (
     StringVar,
     Text,
     Tk,
+    ttk,
     Toplevel,
     filedialog,
     messagebox,
@@ -3432,6 +3433,52 @@ class ExecutionQueueWindow:
             command=self.clear_completed,
         ).pack(side=LEFT, padx=(0, 6))
 
+        filter_row = Frame(outer)
+        filter_row.pack(fill=X, pady=(0, 8))
+
+        Label(filter_row, text="Status:", width=8, anchor="w").pack(side=LEFT)
+
+        self.history_filter_var = StringVar(value="all")
+
+        self.history_filter = ttk.Combobox(
+            filter_row,
+            textvariable=self.history_filter_var,
+            values=[
+                "all",
+                "queued",
+                "started",
+                "success",
+                "failed",
+                "cancelled",
+            ],
+            width=14,
+            state="readonly",
+        )
+
+        self.history_filter.pack(side=LEFT, padx=(0, 12))
+
+        Label(filter_row, text="Search:", width=8, anchor="w").pack(side=LEFT)
+
+        self.history_search_var = StringVar()
+
+        self.history_search = Entry(
+            filter_row,
+            textvariable=self.history_search_var,
+            width=40,
+        )
+
+        self.history_search.pack(side=LEFT, fill=X, expand=True)
+
+        self.history_filter.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: self.refresh(),
+        )
+
+        self.history_search_var.trace_add(
+            "write",
+            lambda *_args: self.refresh(),
+        )
+
         self.info = Text(outer, wrap="word", height=5)
         self.info.pack(fill=X, pady=(0, 8))
 
@@ -3473,7 +3520,7 @@ class ExecutionQueueWindow:
 
         Label(
             completed_frame,
-            text="Recent Completed Jobs",
+            text="Execution History",
             anchor="w",
             bg="#dddddd",
             fg="black",
@@ -3566,7 +3613,7 @@ class ExecutionQueueWindow:
         if hasattr(self, "completed_listbox"):
             self.completed_listbox.delete(0, END)
 
-        completed_source = self.app.get_execution_history()
+        completed_source = self.filtered_completed_history()
 
         # existing running_text logic goes here
 
@@ -3692,6 +3739,45 @@ class ExecutionQueueWindow:
         if not self.app.is_execution_queue_paused():
             self.app.root.after(10, self.app.process_execution_queue)
 
+    def filtered_completed_history(self):
+        history = self.app.get_execution_history()
+
+        status_filter = (
+            self.history_filter_var.get().strip().lower()
+            if hasattr(self, "history_filter_var")
+            else "all"
+        )
+
+        search = (
+            self.history_search_var.get().strip().lower()
+            if hasattr(self, "history_search_var")
+            else ""
+        )
+
+        results = []
+
+        for job in history:
+            status = str(job.get("status", "")).lower()
+
+            if status_filter != "all" and status != status_filter:
+                continue
+
+            if search:
+                blob = " ".join([
+                    str(job.get("source", "")),
+                    str(job.get("category", "")),
+                    str(job.get("command", "")),
+                    str(job.get("status", "")),
+                    str(job.get("error", "")),
+                ]).lower()
+
+                if search not in blob:
+                    continue
+
+            results.append(job)
+
+        return results
+
     def lock_selection(self, _event=None):
         self._selection_lock_until = time.time() + 3
 
@@ -3727,7 +3813,6 @@ class ExecutionQueueWindow:
 
         self.details.delete("1.0", END)
         self.details.insert("1.0", "\n".join(lines))
-
 
     def show_pending_details(self, _event=None):
         self.lock_selection()
