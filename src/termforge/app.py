@@ -4105,6 +4105,185 @@ class ExecutionQueueWindow:
 
         return index
 
+class ProfileManagerWindow:
+    def __init__(self, app):
+        self.app = app
+        self.window = Toplevel(app.root)
+        self.window.title("Profile / Environment Manager")
+        self.window.geometry("880x520")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Profile / Environment Manager",
+            bd=4,
+            width=38,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(action_row, text="Save Current Window", width=20, bg="darkgreen", fg="white", command=self.save_current).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Select Profile", width=16, bg="#2f5597", fg="white", command=self.select_profile).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Test Profile", width=14, bg="navy", fg="white", command=self.test_profile).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Delete", width=14, bg="#7f6000", fg="white", command=self.delete_profile).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Refresh", width=14, bg="#555555", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
+
+        body = Frame(outer)
+        body.pack(fill=BOTH, expand=True)
+
+        left = Frame(body)
+        left.pack(side=LEFT, fill=BOTH, expand=True)
+
+        right = Frame(body)
+        right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
+
+        self.listbox = Listbox(left, width=44, height=22, exportselection=False)
+        self.listbox.pack(side=LEFT, fill=BOTH, expand=True)
+
+        scrollbar = Scrollbar(left, command=self.listbox.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self.listbox.config(yscrollcommand=scrollbar.set)
+
+        form = Frame(right)
+        form.pack(fill=X)
+
+        Label(form, text="Profile Name:", width=16, anchor="w").grid(row=0, column=0, sticky="w", pady=3)
+        self.name_var = StringVar()
+        Entry(form, textvariable=self.name_var, width=42).grid(row=0, column=1, sticky="ew", pady=3)
+
+        Label(form, text="Window ID:", width=16, anchor="w").grid(row=1, column=0, sticky="w", pady=3)
+        self.window_id_var = StringVar()
+        Entry(form, textvariable=self.window_id_var, width=42).grid(row=1, column=1, sticky="ew", pady=3)
+
+        form.columnconfigure(1, weight=1)
+
+        self.info = Text(right, wrap="word", height=16)
+        self.info.pack(fill=BOTH, expand=True, pady=(10, 0))
+
+        self.snapshot = []
+        self.listbox.bind("<<ListboxSelect>>", self.on_select)
+
+        self.refresh()
+
+    def refresh(self):
+        profiles = self.app.get_window_profiles()
+        self.snapshot = []
+
+        self.listbox.delete(0, END)
+
+        for name in sorted(profiles.keys()):
+            profile = profiles.get(name, {})
+
+            if isinstance(profile, dict):
+                window_id = profile.get("window_id", "")
+            else:
+                window_id = profile
+                profile = {
+                    "window_id": window_id,
+                    "legacy_format": True,
+                }
+            self.snapshot.append((name, profile))
+            self.listbox.insert(END, f"{name} -> {window_id}")
+
+        self.info.delete("1.0", END)
+        self.info.insert(
+            "1.0",
+            "Select a profile or save the current selected target window.\n\n"
+            "Use this with chain steps like:\n"
+            "[\"select_profile\", \"server\"]"
+        )
+
+    def selected_profile_name(self):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return None
+        return self.snapshot[idxs[0]][0]
+
+    def on_select(self, _event=None):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return
+
+        name, profile = self.snapshot[idxs[0]]
+        self.name_var.set(name)
+        self.window_id_var.set(str(profile.get("window_id", "")))
+
+        self.info.delete("1.0", END)
+        self.info.insert("1.0", pprint.pformat(profile, indent=4))
+
+    def save_current(self):
+        name = self.name_var.get().strip()
+
+        if not name:
+            messagebox.showerror("Profile Manager", "Enter a profile name first.")
+            return
+
+        try:
+            self.app.save_current_window_as_profile(name)
+        except Exception as exc:
+            self.app.show_traceback_window("Save Profile Failed", exc)
+            return
+
+        self.app.set_status(f"Saved profile: {name}")
+        self.refresh()
+
+    def select_profile(self):
+        name = self.name_var.get().strip() or self.selected_profile_name()
+
+        if not name:
+            messagebox.showerror("Profile Manager", "Select a profile first.")
+            return
+
+        try:
+            self.app.select_window_profile(name)
+        except Exception as exc:
+            self.app.show_traceback_window("Select Profile Failed", exc)
+            return
+
+        self.refresh()
+
+    def test_profile(self):
+        name = self.name_var.get().strip() or self.selected_profile_name()
+
+        if not name:
+            messagebox.showerror("Profile Manager", "Select a profile first.")
+            return
+
+        try:
+            self.app.select_window_profile(name)
+            self.app.send_to_selected_window("echo TERMFORGE_PROFILE_TEST")
+        except Exception as exc:
+            self.app.show_traceback_window("Test Profile Failed", exc)
+            return
+
+        messagebox.showinfo("Profile Manager", f"Profile tested:\n\n{name}")
+
+    def delete_profile(self):
+        name = self.name_var.get().strip() or self.selected_profile_name()
+
+        if not name:
+            messagebox.showerror("Profile Manager", "Select a profile first.")
+            return
+
+        if not messagebox.askokcancel("Delete Profile", f"Delete profile '{name}'?"):
+            return
+
+        profiles = self.app.get_window_profiles()
+        profiles.pop(name, None)
+        self.app.save_window_profiles()
+
+        self.name_var.set("")
+        self.window_id_var.set("")
+        self.refresh()
+
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
         self.root = root
@@ -4322,6 +4501,83 @@ class TermForgeApp:
             self.root.quit()
         finally:
             self.root.destroy()
+
+    def open_profile_manager(self) -> None:
+        ProfileManagerWindow(self)
+
+    def get_window_profiles(self) -> dict:
+        windows = getattr(self.cfg, "Windows", {})
+        if not isinstance(windows, dict):
+            windows = {}
+            setattr(self.cfg, "Windows", windows)
+        return windows
+
+
+    def save_window_profiles(self) -> None:
+        self.persist_full_config()
+
+
+    def get_selected_window_id(self):
+        for attr in (
+            "selected_window_id",
+            "selected_window",
+            "target_window_id",
+            "target_window",
+            "current_window",
+            "window_id",
+        ):
+            value = getattr(self, attr, None)
+            if value:
+                return value
+
+        return None
+
+
+    def save_current_window_as_profile(self, profile_name: str) -> None:
+        profile_name = profile_name.strip()
+        if not profile_name:
+            raise TermForgeError("Profile name is required.")
+
+        window_id = self.get_selected_window_id()
+        if not window_id:
+            raise TermForgeError("No target window selected.")
+
+        profiles = self.get_window_profiles()
+        profiles[profile_name] = {
+            "window_id": window_id,
+            "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+        self.save_window_profiles()
+
+
+    def select_window_profile(self, profile_name: str) -> None:
+        profiles = self.get_window_profiles()
+
+        profile = profiles.get(profile_name)
+
+        if isinstance(profile, dict):
+            window_id = profile.get("window_id")
+        else:
+            window_id = profile
+
+        if not profile:
+            raise TermForgeError(f"Unknown profile: {profile_name}")
+
+        window_id = profile.get("window_id")
+        if not window_id:
+            raise TermForgeError(f"Profile has no window_id: {profile_name}")
+
+        if hasattr(self, "selected_window"):
+            self.selected_window = window_id
+
+        if hasattr(self, "selected_window_id"):
+            self.selected_window_id = window_id
+
+        self.set_status(f"Selected profile: {profile_name} -> {window_id}")
+
+    def open_profiles(self) -> dict:
+        ProfileManagerWindow(self)
 
     def terminate_current_process(self) -> None:
         proc = getattr(self, "current_process", None)
@@ -5202,19 +5458,8 @@ class TermForgeApp:
         except Exception as exc:
             self.show_traceback_window("Target Window", str(exc))
 
-    def select_profile(self, name: str) -> None:
-        windows = self.get_windows_dict()
-        saved = windows.get(name)
-
-        if saved and self.validate_window_id(saved):
-            self.window_id = saved
-            self.set_status(f"Using profile '{name}' -> {saved}")
-            return
-
-        self.set_status(f"Select window for profile '{name}'")
-        self.select_target_window()
-        windows[name] = self.window_id
-        self.persist_windows()
+    def select_profile(self, profile_name: str) -> None:
+        self.select_window_profile(profile_name)
 
     def resolve_command_placeholders(self, cmd: str, shared_vars: dict[str, str] | None = None):
         if not isinstance(cmd, str):
@@ -6228,8 +6473,9 @@ class TermForgeApp:
         tools_menu.add_command(label="Backup Manager", command=self.open_backup_manager)
         tools_menu.add_separator()
         tools_menu.add_command(label="Tag Manager", command=self.open_tag_manager)
-        tools_menu.add_command(label="Execution Queue", command=self.open_execution_queue)
+        tools_menu.add_command(label="Profile Manager", command=self.open_profile_manager)
         tools_menu.add_separator()
+        tools_menu.add_command(label="Execution Queue", command=self.open_execution_queue)
         tools_menu.add_command(label="Pause Execution Queue", command=self.pause_execution_queue)
         tools_menu.add_command(label="Resume Execution Queue", command=self.resume_execution_queue)
         tools_menu.add_command(label="Toggle Execution Queue Pause", command=self.toggle_execution_queue_pause)
