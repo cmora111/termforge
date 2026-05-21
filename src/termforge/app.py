@@ -3354,14 +3354,15 @@ class ExecutionQueueWindow:
         Button(toolbar_top, text="Pause Queue", width=14, bg="#7f6000", fg="white", command=self.pause_queue).pack(side=LEFT, padx=(0, 6))
         Button(toolbar_top, text="Resume Queue", width=14, bg="darkgreen", fg="white", command=self.resume_queue).pack(side=LEFT, padx=(0, 6))
         Button(toolbar_top, text="Run Next", width=14, bg="#2f5597", fg="white", command=self.run_next).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_top, text="Run Selected Next", width=18, bg="#2f5597", fg="white", command=self.run_selected_next).pack(side=LEFT, padx=(0, 6))
         Button(toolbar_top, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
 
         # Row 2: pending job control
         Button(toolbar_middle, text="Cancel Pending", width=16, bg="#7f6000", fg="white", command=self.cancel_pending).pack(side=LEFT, padx=(0, 6))
-        Button(toolbar_middle, text="Run Selected Next", width=18, bg="#2f5597", fg="white", command=self.run_selected_next).pack(side=LEFT, padx=(0, 6))
         Button(toolbar_middle, text="Move Up", width=14, bg="#444488", fg="white", command=self.move_pending_up).pack(side=LEFT, padx=(0, 6))
         Button(toolbar_middle, text="Move Down", width=14, bg="#444488", fg="white", command=self.move_pending_down).pack(side=LEFT, padx=(0, 6))
         Button(toolbar_middle, text="Clear Completed", width=16, bg="#555555", fg="white", command=self.clear_completed).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_middle, text="Clear Queue", width=14, bg="#7f0000", fg="white", command=self.clear_queue).pack(side=LEFT, padx=(0, 6))
 
         # Row 3: history/process control
         Button(toolbar_bottom, text="Priority High", width=14, bg="#2f5597", fg="white", command=lambda: self.set_selected_priority("high")).pack(side=LEFT, padx=(0, 6))
@@ -3369,7 +3370,7 @@ class ExecutionQueueWindow:
         Button(toolbar_bottom, text="Retry Failed", width=14, bg="#2f5597", fg="white", command=self.retry_failed_job).pack(side=LEFT, padx=(0, 6))
         Button(toolbar_bottom, text="Terminate Running", width=18, bg="#7f6000", fg="white", command=self.terminate_running).pack(side=LEFT, padx=(0, 6))
         Button(toolbar_bottom, text="Kill Running", width=14, bg="#7f0000", fg="white", command=self.kill_running).pack(side=LEFT, padx=(0, 6))
-        Button(toolbar_bottom, text="Clear Queue", width=14, bg="#7f0000", fg="white", command=self.clear_queue).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_bottom, text="Export History", width=16, bg="#2f5597", fg="white", command=self.export_history,).pack(side=LEFT, padx=(0, 6))
 
         filter_row = Frame(outer)
         filter_row.pack(fill=X, pady=(0, 8))
@@ -3757,6 +3758,36 @@ class ExecutionQueueWindow:
 
         if not self.app.is_execution_queue_paused():
             self.app.root.after(10, self.app.process_execution_queue)
+
+    def export_history(self):
+        history = self.filtered_completed_history()
+
+        if not history:
+            messagebox.showinfo("Export History", "No execution history to export.")
+            return
+
+        target = filedialog.asksaveasfilename(
+            title="Export Execution History",
+            defaultextension=".json",
+            initialfile="termforge_execution_history.json",
+            filetypes=[
+                ("JSON files", "*.json"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if not target:
+            return
+
+        Path(target).write_text(
+            json.dumps(history, indent=2),
+            encoding="utf-8",
+        )
+
+        messagebox.showinfo(
+            "Export History",
+            f"Exported {len(history)} execution history entries to:\n\n{target}",
+        )
 
     def set_selected_priority(self, priority: str):
         index = self.selected_pending_index()
