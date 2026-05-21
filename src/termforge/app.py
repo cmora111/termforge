@@ -3315,9 +3315,10 @@ class ExecutionQueueWindow:
         self.app = app
         self.window = Toplevel(app.root)
         self.window.title("Execution Queue")
-        self.window.geometry("985x840")
+        self.window.geometry("980x840")
         self.window.transient(app.root)
         self._selection_lock_until = 0
+        self.app.poll_current_process()
 
         PRIORITY_ORDER = {
             "critical": 0,
@@ -3342,134 +3343,33 @@ class ExecutionQueueWindow:
         toolbar_top = Frame(outer)
         toolbar_top.pack(fill=X, pady=(0, 4))
 
-        Button(
-            toolbar_top,
-            text="Refresh",
-            width=14,
-            bg="navy",
-            fg="white",
-            command=self.refresh,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            toolbar_top,
-            text="Pause Queue",
-            width=14,
-            bg="#7f6000",
-            fg="white",
-            command=self.pause_queue,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            toolbar_top,
-            text="Resume Queue",
-            width=14,
-            bg="darkgreen",
-            fg="white",
-            command=self.resume_queue,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            toolbar_top,
-            text="Run Next",
-            width=14,
-            bg="#2f5597",
-            fg="white",
-            command=self.run_next,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            toolbar_top,
-            text="Run Selected Next",
-            width=18,
-            bg="#2f5597",
-            fg="white",
-            command=self.run_selected_next,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            toolbar_top,
-            text="Close",
-            width=14,
-            bg="red",
-            fg="black",
-            command=self.window.destroy,
-        ).pack(side=RIGHT)
+        toolbar_middle = Frame(outer)
+        toolbar_middle.pack(fill=X, pady=(0, 4))
 
         toolbar_bottom = Frame(outer)
         toolbar_bottom.pack(fill=X, pady=(0, 8))
 
-        Button(
-            toolbar_bottom,
-            text="Cancel Pending",
-            width=16,
-            bg="#7f6000",
-            fg="white",
-            command=self.cancel_pending,
-        ).pack(side=LEFT, padx=(0, 6))
+        # Row 1: basic control
+        Button(toolbar_top, text="Refresh", width=14, bg="navy", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_top, text="Pause Queue", width=14, bg="#7f6000", fg="white", command=self.pause_queue).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_top, text="Resume Queue", width=14, bg="darkgreen", fg="white", command=self.resume_queue).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_top, text="Run Next", width=14, bg="#2f5597", fg="white", command=self.run_next).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_top, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
 
-        Button(
-            toolbar_bottom,
-            text="Move Up",
-            width=14,
-            bg="#444488",
-            fg="white",
-            command=self.move_pending_up,
-        ).pack(side=LEFT, padx=(0, 6))
+        # Row 2: pending job control
+        Button(toolbar_middle, text="Cancel Pending", width=16, bg="#7f6000", fg="white", command=self.cancel_pending).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_middle, text="Run Selected Next", width=18, bg="#2f5597", fg="white", command=self.run_selected_next).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_middle, text="Move Up", width=14, bg="#444488", fg="white", command=self.move_pending_up).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_middle, text="Move Down", width=14, bg="#444488", fg="white", command=self.move_pending_down).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_middle, text="Clear Completed", width=16, bg="#555555", fg="white", command=self.clear_completed).pack(side=LEFT, padx=(0, 6))
 
-        Button(
-            toolbar_bottom,
-            text="Move Down",
-            width=14,
-            bg="#444488",
-            fg="white",
-            command=self.move_pending_down,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            toolbar_bottom,
-            text="Retry Failed",
-            width=14,
-            bg="#2f5597",
-            fg="white",
-            command=self.retry_failed_job,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            toolbar_bottom,
-            text="Clear Queue",
-            width=14,
-            bg="#7f0000",
-            fg="white",
-            command=self.clear_queue,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            toolbar_bottom,
-            text="Priority High",
-            width=14,
-            bg="#2f5597",
-            fg="white",
-            command=lambda: self.set_selected_priority("high"),
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            toolbar_bottom,
-            text="Priority Low",
-            width=14,
-            bg="#555555",
-            fg="white",
-            command=lambda: self.set_selected_priority("low"),
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            toolbar_bottom,
-            text="Clear Completed",
-            width=16,
-            bg="#555555",
-            fg="white",
-            command=self.clear_completed,
-        ).pack(side=LEFT, padx=(0, 6))
+        # Row 3: history/process control
+        Button(toolbar_bottom, text="Priority High", width=14, bg="#2f5597", fg="white", command=lambda: self.set_selected_priority("high")).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_bottom, text="Priority Low", width=14, bg="#555555", fg="white", command=lambda: self.set_selected_priority("low")).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_bottom, text="Retry Failed", width=14, bg="#2f5597", fg="white", command=self.retry_failed_job).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_bottom, text="Terminate Running", width=18, bg="#7f6000", fg="white", command=self.terminate_running).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_bottom, text="Kill Running", width=14, bg="#7f0000", fg="white", command=self.kill_running).pack(side=LEFT, padx=(0, 6))
+        Button(toolbar_bottom, text="Clear Queue", width=14, bg="#7f0000", fg="white", command=self.clear_queue).pack(side=LEFT, padx=(0, 6))
 
         filter_row = Frame(outer)
         filter_row.pack(fill=X, pady=(0, 8))
@@ -3628,6 +3528,8 @@ class ExecutionQueueWindow:
             pass
 
     def refresh(self):
+        self.app.poll_current_process()
+
         selected_pending_index = None
         selected_completed_index = None
 
@@ -3653,45 +3555,123 @@ class ExecutionQueueWindow:
 
         completed_source = self.filtered_completed_history()
 
-        # existing running_text logic goes here
+        running = getattr(self.app, "current_job", None)
+        started_at = getattr(self.app, "current_job_started_at", None)
+
+        if self.app.is_execution_queue_paused():
+            running_text = "QUEUE: PAUSED"
+
+        elif running:
+            duration = ""
+
+            if started_at:
+                seconds = int(
+                    (datetime.now() - started_at).total_seconds()
+                )
+                duration = f"{seconds}s"
+
+            running_text = (
+                f"QUEUE: RUNNING\n"
+                f"[{running.get('source', 'manual')}] "
+                f"{running.get('category')}/"
+                f"{running.get('command')}"
+            )
+
+            if duration:
+                running_text += f"\nDuration: {duration}"
+
+        else:
+            running_text = "QUEUE: IDLE"
+
+        proc = getattr(self.app, "current_process", None)
+        proc_job = getattr(self.app, "current_process_job", None)
+
+        if proc is not None and proc_job:
+            running_text += (
+                f"\n\nProcess PID: {proc.pid}"
+                f"\nProcess Command: "
+                f"{proc_job.get('command', '')}"
+            )
+
+        self.info.delete("1.0", END)
+
+        self.info.insert(
+            "1.0",
+            f"{running_text}\n\n"
+            f"Pending jobs: {len(self.app.execution_queue)}\n"
+            f"Completed jobs: {len(completed_source)}"
+        )
 
         for index, job in enumerate(self.app.execution_queue):
             prefix = "▶ " if index == 0 else "  "
+
             priority = job.get("priority", "normal")
+
             self.listbox.insert(
                 END,
-                f'{prefix}{index + 1}. [{priority}] [{job.get("source", "manual")}] '
-                f'{job.get("category")}/{job.get("command")} '
+                f'{prefix}{index + 1}. '
+                f'[{priority}] '
+                f'[{job.get("source", "manual")}] '
+                f'{job.get("category")}/'
+                f'{job.get("command")} '
                 f'@ {job.get("created_at", "")}'
             )
 
-        if selected_pending_index is not None and selected_pending_index < self.listbox.size():
+        if (
+            selected_pending_index is not None
+            and selected_pending_index < self.listbox.size()
+        ):
             self.listbox.selection_set(selected_pending_index)
             self.listbox.activate(selected_pending_index)
 
         if hasattr(self, "completed_listbox"):
+
             for index, job in enumerate(completed_source, start=1):
+
                 status = job.get("status", "?")
                 error = job.get("error", "")
                 suffix = f" — {error}" if error else ""
 
                 self.completed_listbox.insert(
                     END,
-                    f'{index}. [{status}] [{job.get("source", "manual")}] '
-                    f'{job.get("category")}/{job.get("command")} '
-                    f'@ {job.get("timestamp", job.get("completed_at", ""))}{suffix}'
+                    f'{index}. '
+                    f'[{status}] '
+                    f'[{job.get("priority", "normal")}] '
+                    f'[{job.get("source", "manual")}] '
+                    f'{job.get("category")}/'
+                    f'{job.get("command")} '
+                    f'@ {job.get("timestamp", "")}'
+                    f'{suffix}'
                 )
 
             if (
                 selected_completed_index is not None
-                and selected_completed_index < self.completed_listbox.size()
+                and selected_completed_index
+                < self.completed_listbox.size()
             ):
-                self.completed_listbox.selection_set(selected_completed_index)
-                self.completed_listbox.activate(selected_completed_index)
+                self.completed_listbox.selection_set(
+                    selected_completed_index
+                )
+
+                self.completed_listbox.activate(
+                    selected_completed_index
+                )
+
         if hasattr(self, "details"):
-            if not self.listbox.curselection() and not self.completed_listbox.curselection():
+            if (
+                not self.listbox.curselection()
+                and (
+                    not hasattr(self, "completed_listbox")
+                    or not self.completed_listbox.curselection()
+                )
+            ):
                 self.details.delete("1.0", END)
-                self.details.insert("1.0", "Select a pending or completed job to view details.")
+
+                self.details.insert(
+                    "1.0",
+                    "Select a pending or completed job "
+                    "to view details."
+                )
 
     def run_next(self):
         self.app.process_execution_queue()
@@ -3799,6 +3779,15 @@ class ExecutionQueueWindow:
         self.listbox.selection_set(index)
         self.listbox.activate(index)
 
+    def terminate_running(self):
+        self.app.terminate_current_process()
+        self.refresh()
+
+
+    def kill_running(self):
+        self.app.kill_current_process()
+        self.refresh()
+
     def filtered_completed_history(self):
         history = self.app.get_execution_history()
 
@@ -3863,14 +3852,14 @@ class ExecutionQueueWindow:
         if error:
             lines.extend([
                 "Error:",
-                str(error),
-                "",
-            ])
+                    str(error),
+                    "",
+                ])
 
-        lines.extend([
-            "Raw:",
-            pprint.pformat(job, indent=4),
-        ])
+            lines.extend([
+                "Raw:",
+                pprint.pformat(job, indent=4),
+            ])
 
         self.details.delete("1.0", END)
         self.details.insert("1.0", "\n".join(lines))
@@ -4043,6 +4032,8 @@ class TermForgeApp:
         self.current_job = None
         self.current_job_started_at = None
         self.completed_jobs = []
+        self.current_process = None
+        self.current_process_job = None
 
         if self.debug:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -4229,6 +4220,33 @@ class TermForgeApp:
             self.root.quit()
         finally:
             self.root.destroy()
+
+    def terminate_current_process(self) -> None:
+        proc = getattr(self, "current_process", None)
+
+        if proc is None:
+            self.set_status("No running process to terminate.")
+            return
+
+        try:
+            proc.terminate()
+            self.set_status("Terminate signal sent to running process.")
+        except Exception as exc:
+            self.show_traceback_window("Terminate Running Process Failed", exc)
+
+
+    def kill_current_process(self) -> None:
+        proc = getattr(self, "current_process", None)
+
+        if proc is None:
+            self.set_status("No running process to kill.")
+            return
+
+        try:
+            proc.kill()
+            self.set_status("Kill signal sent to running process.")
+        except Exception as exc:
+            self.show_traceback_window("Kill Running Process Failed", exc)
 
     def is_execution_queue_paused(self) -> bool:
         return bool(getattr(self, "execution_queue_paused", False))
@@ -5445,13 +5463,62 @@ class TermForgeApp:
             elif normalized in (2, "command", "send"):
                 self.send_to_selected_window(str(resolved_cmd), record_history=record_history)
             elif normalized in (3, "detached"):
-                self.run_detached(str(resolved_cmd), record_history=record_history)
+                proc = subprocess.Popen(str(resolved_cmd), shell=True)
+
+                self.current_process = proc
+
+                self.current_process_job = {
+                    "category": "",
+                    "command": str(resolved_cmd),
+                    "source": "detached",
+                    "pid": proc.pid,
+                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+
+                self.set_status(f"Started detached process PID {proc.pid}")
+
+                if record_history:
+                    self.add_history_entry("detatched", str(resolved_cmd), source="manual")
             elif normalized == "plugin":
                 self.run_plugin(cmd)
             else:
                 raise TermForgeError(f"Unknown command type: {cmd_type}")
         except Exception as exc:
             self.show_traceback_window(f"Command failed", str(exc))
+
+    def poll_current_process(self) -> None:
+        proc = getattr(self, "current_process", None)
+
+        if proc is None:
+            return
+
+        try:
+            code = proc.poll()
+        except Exception:
+            self.current_process = None
+            self.current_process_job = None
+            return
+
+        if code is not None:
+            job = getattr(self, "current_process_job", None) or {}
+
+            try:
+                self.add_execution_history(
+                    {
+                        "source": job.get("source", "detached"),
+                        "category": job.get("category", ""),
+                        "command": job.get("command", ""),
+                        "priority": job.get("priority", "normal"),
+                    },
+                    "process_exit",
+                    f"exit_code={code}",
+                )
+            except Exception:
+                pass
+
+            self.current_process = None
+            self.current_process_job = None
+            self.set_status(f"Detached process exited with code {code}")
 
     def get_schedule_history(self) -> list:
         history = getattr(self.cfg, "ScheduleHistory", [])
