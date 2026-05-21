@@ -3365,8 +3365,39 @@ class ExecutionQueueWindow:
         Button(toolbar_middle, text="Clear Queue", width=14, bg="#7f0000", fg="white", command=self.clear_queue).pack(side=LEFT, padx=(0, 6))
 
         # Row 3: history/process control
-        Button(toolbar_bottom, text="Priority High", width=14, bg="#2f5597", fg="white", command=lambda: self.set_selected_priority("high")).pack(side=LEFT, padx=(0, 6))
-        Button(toolbar_bottom, text="Priority Low", width=14, bg="#555555", fg="white", command=lambda: self.set_selected_priority("low")).pack(side=LEFT, padx=(0, 6))
+        Label(
+            toolbar_bottom,
+            text="Priority:",
+            width=8,
+            anchor="w",
+        ).pack(side=LEFT, padx=(0, 4))
+
+        self.priority_var = StringVar(value="normal")
+
+        self.priority_combo = ttk.Combobox(
+            toolbar_bottom,
+            textvariable=self.priority_var,
+            values=[
+                "critical",
+                "high",
+                "normal",
+                "low",
+            ],
+            width=12,
+            state="readonly",
+        )
+
+        self.priority_combo.pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            toolbar_bottom,
+            text="Apply Priority",
+            width=16,
+            bg="#2f5597",
+            fg="white",
+            command=self.apply_selected_priority,
+        ).pack(side=LEFT, padx=(0, 12))
+
         Button(toolbar_bottom, text="Retry Failed", width=14, bg="#2f5597", fg="white", command=self.retry_failed_job).pack(side=LEFT, padx=(0, 6))
         Button(toolbar_bottom, text="Terminate Running", width=18, bg="#7f6000", fg="white", command=self.terminate_running).pack(side=LEFT, padx=(0, 6))
         Button(toolbar_bottom, text="Kill Running", width=14, bg="#7f0000", fg="white", command=self.kill_running).pack(side=LEFT, padx=(0, 6))
@@ -3759,6 +3790,40 @@ class ExecutionQueueWindow:
         if not self.app.is_execution_queue_paused():
             self.app.root.after(10, self.app.process_execution_queue)
 
+    def apply_selected_priority(self):
+        index = self.selected_pending_index()
+
+        if index is None:
+            messagebox.showerror(
+                "Execution Queue",
+                "Select a pending job first.",
+            )
+            return
+
+        queue = self.app.execution_queue
+
+        if index < 0 or index >= len(queue):
+            return
+
+        priority = self.priority_var.get().strip().lower()
+
+        if priority not in PRIORITY_ORDER:
+            priority = "normal"
+
+        queue[index]["priority"] = priority
+
+        self.app.set_status(
+            f"Set priority {priority}: "
+            f"{queue[index].get('category')}/"
+            f"{queue[index].get('command')}"
+        )
+
+        self.refresh()
+
+        self.listbox.selection_clear(0, END)
+        self.listbox.selection_set(index)
+        self.listbox.activate(index)
+
     def export_history(self):
         history = self.filtered_completed_history()
 
@@ -3906,6 +3971,12 @@ class ExecutionQueueWindow:
             return
 
         job = self.app.execution_queue[index]
+
+        if hasattr(self, "priority_var"):
+            self.priority_var.set(
+                job.get("priority", "normal")
+            )
+
         self.show_job_details(job, "Pending Job")
 
 
