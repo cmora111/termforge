@@ -119,6 +119,7 @@ def ensure_user_config() -> None:
         "BackupDir = str(CONFIG_DIR / 'backups')",
         "ExecutionHistory = []",
         "Variables = {}",
+        "EnvironmentTemplates = {}",
         "",
     ]
     backup_dir = Path(getattr(cfg, "BackupDir", CONFIG_DIR / "backups"))
@@ -1465,6 +1466,10 @@ class ChainBuilderWindow:
             elif kind == "select_profile":
                 if len(step) < 2 or not str(step[1]).strip():
                     errors.append(f"Step {index}: select_profile requires a profile name.")
+
+            elif kind == "environment":
+                if len(step) < 2 or not str(step[1]).strip():
+                    errors.append(f"Step {index}: environment requires a template name.")
 
             elif kind == "sleep":
                 if len(step) < 2:
@@ -4673,6 +4678,355 @@ class VariableManagerWindow:
         self.app.set_status(f"Deleted variable: {name}")
         self.refresh()
 
+class EnvironmentTemplateWindow:
+    def __init__(self, app):
+        self.app = app
+
+        self.window = Toplevel(app.root)
+        self.window.title("Environment Templates")
+        self.window.geometry("980x620")
+        self.window.transient(app.root)
+
+        outer = Frame(
+            self.window,
+            padx=8,
+            pady=8,
+        )
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Environment Templates",
+            bd=4,
+            width=36,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(
+            action_row,
+            text="Save",
+            width=14,
+            bg="darkgreen",
+            fg="white",
+            command=self.save_template,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Delete",
+            width=14,
+            bg="#7f6000",
+            fg="white",
+            command=self.delete_template,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Activate",
+            width=14,
+            bg="#2f5597",
+            fg="white",
+            command=self.activate_template,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Refresh",
+            width=14,
+            bg="navy",
+            fg="white",
+            command=self.refresh,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Close",
+            width=14,
+            bg="red",
+            fg="black",
+            command=self.window.destroy,
+        ).pack(side=RIGHT)
+
+        body = Frame(outer)
+        body.pack(fill=BOTH, expand=True)
+
+        left = Frame(body)
+        left.pack(side=LEFT, fill=BOTH, expand=True)
+
+        right = Frame(body)
+        right.pack(
+            side=RIGHT,
+            fill=BOTH,
+            expand=True,
+            padx=(10, 0),
+        )
+
+        self.listbox = Listbox(
+            left,
+            width=42,
+            height=24,
+            exportselection=False,
+        )
+
+        self.listbox.pack(
+            side=LEFT,
+            fill=BOTH,
+            expand=True,
+        )
+
+        scrollbar = Scrollbar(
+            left,
+            command=self.listbox.yview,
+        )
+
+        scrollbar.pack(side=RIGHT, fill=Y)
+
+        self.listbox.config(
+            yscrollcommand=scrollbar.set
+        )
+
+        form = Frame(right)
+        form.pack(fill=X)
+
+        Label(
+            form,
+            text="Template Name:",
+            width=16,
+            anchor="w",
+        ).grid(
+            row=0,
+            column=0,
+            sticky="w",
+            pady=3,
+        )
+
+        self.name_var = StringVar()
+
+        Entry(
+            form,
+            textvariable=self.name_var,
+            width=42,
+        ).grid(
+            row=0,
+            column=1,
+            sticky="ew",
+            pady=3,
+        )
+
+        Label(
+            form,
+            text="Variables JSON:",
+            width=16,
+            anchor="nw",
+        ).grid(
+            row=1,
+            column=0,
+            sticky="nw",
+            pady=3,
+        )
+
+        self.variables_text = Text(
+            form,
+            height=14,
+            width=60,
+            wrap="word",
+        )
+
+        self.variables_text.grid(
+            row=1,
+            column=1,
+            sticky="nsew",
+            pady=3,
+        )
+
+        form.columnconfigure(1, weight=1)
+
+        self.preview = Text(
+            right,
+            wrap="word",
+            height=12,
+        )
+
+        self.preview.pack(
+            fill=BOTH,
+            expand=True,
+            pady=(10, 0),
+        )
+
+        self.snapshot = []
+
+        self.listbox.bind(
+            "<<ListboxSelect>>",
+            self.on_select,
+        )
+
+        self.refresh()
+
+    def refresh(self):
+        templates = self.app.get_environment_templates()
+
+        self.snapshot = []
+
+        self.listbox.delete(0, END)
+
+        current = self.app.get_current_environment()
+
+        for name in sorted(templates.keys()):
+            vars_dict = templates.get(name, {})
+
+            prefix = "▶ " if name == current else ""
+
+            self.snapshot.append(
+                (name, vars_dict)
+            )
+
+            self.listbox.insert(
+                END,
+                f"{prefix}{name} "
+                f"({len(vars_dict)} vars)"
+            )
+
+        self.preview.delete("1.0", END)
+
+        self.preview.insert(
+            "1.0",
+            "Environment templates allow reusable "
+            "sets of variables.\n\n"
+            "Example:\n\n"
+            "{\n"
+            '    "repo": "/home/mora/project",\n'
+            '    "venv": "/home/mora/project/.venv"\n'
+            "}\n\n"
+            "Use in commands:\n"
+            "  cd ${repo}\n"
+            "  source ${venv}/bin/activate"
+        )
+
+    def on_select(self, _event=None):
+        idxs = self.listbox.curselection()
+
+        if not idxs:
+            return
+
+        name, variables = self.snapshot[idxs[0]]
+
+        self.name_var.set(name)
+
+        self.variables_text.delete(
+            "1.0",
+            END,
+        )
+
+        self.variables_text.insert(
+            "1.0",
+            json.dumps(
+                variables,
+                indent=4,
+            ),
+        )
+
+        self.preview.delete("1.0", END)
+
+        self.preview.insert(
+            "1.0",
+            pprint.pformat(
+                variables,
+                indent=4,
+            ),
+        )
+
+    def save_template(self):
+        name = self.name_var.get().strip()
+
+        if not name:
+            messagebox.showerror(
+                "Environment Templates",
+                "Template name is required.",
+            )
+            return
+
+        raw = self.variables_text.get(
+            "1.0",
+            END,
+        ).strip()
+
+        try:
+            variables = json.loads(raw) if raw else {}
+        except Exception as exc:
+            messagebox.showerror(
+                "Environment Templates",
+                f"Invalid JSON:\n\n{exc}",
+            )
+            return
+
+        try:
+            self.app.set_environment_template(
+                name,
+                variables,
+            )
+        except Exception as exc:
+            self.app.show_traceback_window(
+                "Save Environment Template Failed",
+                exc,
+            )
+            return
+
+        self.app.set_status(
+            f"Saved environment template: {name}"
+        )
+
+        self.refresh()
+
+    def delete_template(self):
+        idxs = self.listbox.curselection()
+
+        if not idxs:
+            messagebox.showerror(
+                "Environment Templates",
+                "Select a template first.",
+            )
+            return
+
+        name, _variables = self.snapshot[idxs[0]]
+
+        if not messagebox.askokcancel(
+            "Delete Template",
+            f"Delete environment template '{name}'?",
+        ):
+            return
+
+        self.app.delete_environment_template(name)
+
+        self.refresh()
+
+    def activate_template(self):
+        idxs = self.listbox.curselection()
+
+        if not idxs:
+            messagebox.showerror(
+                "Environment Templates",
+                "Select a template first.",
+            )
+            return
+
+        name, _variables = self.snapshot[idxs[0]]
+
+        try:
+            self.app.set_current_environment(name)
+        except Exception as exc:
+            self.app.show_traceback_window(
+                "Activate Environment Failed",
+                exc,
+            )
+            return
+
+        self.refresh()
+
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
         self.root = root
@@ -4704,6 +5058,7 @@ class TermForgeApp:
         self.completed_jobs = []
         self.current_process = None
         self.current_process_job = None
+        self.current_environment = None
 
         if self.debug:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -4890,6 +5245,137 @@ class TermForgeApp:
             self.root.quit()
         finally:
             self.root.destroy()
+
+    def open_environment_templates(self):
+        EnvironmentTemplateWindow(self)
+
+    def set_current_environment(
+        self,
+        name: str | None,
+    ) -> None:
+
+        if name:
+            templates = self.get_environment_templates()
+
+            if name not in templates:
+                raise TermForgeError(
+                    f"Unknown environment template: {name}"
+                )
+
+        self.current_environment = name
+
+        if name:
+            self.set_status(
+                f"Environment selected: {name}"
+            )
+        else:
+            self.set_status(
+                "Environment cleared."
+            )
+
+
+    def get_current_environment(self):
+        return getattr(
+            self,
+            "current_environment",
+            None,
+        )
+
+    def get_environment_templates(self) -> dict:
+        templates = getattr(
+            self.cfg,
+            "EnvironmentTemplates",
+            None,
+        )
+
+        if templates is None or not isinstance(templates, dict):
+            templates = {}
+            setattr(self.cfg, "EnvironmentTemplates", templates)
+
+        return templates
+
+
+    def set_environment_template(
+        self,
+        name: str,
+        variables: dict,
+    ) -> None:
+        name = name.strip()
+
+        if not name:
+            raise TermForgeError(
+                "Environment template name is required."
+            )
+
+        templates = self.get_environment_templates()
+
+        cleaned = {}
+
+        for key, value in variables.items():
+            key = str(key).strip()
+
+            if not key:
+                continue
+
+            cleaned[key] = str(value)
+
+        templates[name] = cleaned
+
+        setattr(
+            self.cfg,
+            "EnvironmentTemplates",
+            templates,
+        )
+
+        self.persist_full_config()
+
+
+    def delete_environment_template(
+        self,
+        name: str,
+    ) -> None:
+        templates = self.get_environment_templates()
+        templates.pop(name, None)
+
+        setattr(
+            self.cfg,
+            "EnvironmentTemplates",
+            templates,
+        )
+
+        self.persist_full_config()
+
+
+    def resolve_environment_variables(
+        self,
+        text: str,
+        environment_name: str | None = None,
+    ) -> str:
+
+        if not isinstance(text, str):
+            return text
+
+        variables = dict(self.get_variables())
+
+        if environment_name:
+            templates = self.get_environment_templates()
+
+            env_vars = templates.get(environment_name, {})
+
+            if isinstance(env_vars, dict):
+                variables.update(env_vars)
+
+        def replace_var(match):
+            name = match.group(1)
+            return str(
+                variables.get(name, match.group(0))
+            )
+
+        return re.sub(
+            r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}",
+            replace_var,
+            text,
+        )
 
     def window_exists(self, window_id) -> bool:
         if not window_id:
@@ -6388,6 +6874,17 @@ class TermForgeApp:
                     runner.step_done(f"Using profile {step[1]}")
                     continue
 
+                if step_kind == "environment":
+                    if len(step) < 2:
+                        raise TermForgeError("environment step requires an environment template name.")
+
+                    environment_name = str(step[1]).strip()
+
+                    runner.step_running(index, total, f"environment {environment_name}")
+                    self.set_current_environment(environment_name)
+                    runner.step_done(f"Using environment {environment_name}")
+                    continue
+
                 step_type, step_cmd, step_options = parse_command_entry(step)
 
                 if isinstance(step_cmd, str):
@@ -6524,7 +7021,7 @@ class TermForgeApp:
                 if resolved_cmd is None:
                     return
 
-                resolved_cmd = self.resolve_config_variables(resolved_cmd)
+                resolved_cmd = self.resolve_environment_variables(resolved_cmd, self.get_current_environment(),)
 
             if not self.confirm_command(normalized, resolved_cmd, options):
                 self.set_status("Command cancelled by user.")
@@ -7051,6 +7548,7 @@ class TermForgeApp:
             categories = getattr(self.cfg, "Categories", {})
             execution_history = getattr(self.cfg, "ExecutionHistory", [])
             variables = getattr(self.cfg, "Variables", {})
+            environment_templates = getattr(self.cfg, "EnvironmentTemplates", {},)
 
             lines = [
                 "# TermForge user configuration",
@@ -7072,6 +7570,7 @@ class TermForgeApp:
                 f"Categories = {pprint.pformat(categories, indent=4)}",
                 f"ExecutionHistory = {pprint.pformat(execution_history, indent=4)}",
                 f"Variables = {pprint.pformat(variables, indent=4)}",
+                f"EnvironmentTemplates = {pprint.pformat(environment_templates, indent=4)}",
                 "",
             ]
             CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
@@ -7228,6 +7727,7 @@ class TermForgeApp:
         profiles_menu.add_command(label="Config Health Check", command=self.open_config_health_check,)
         profiles_menu.add_command(label="Backup Manager", command=self.open_backup_manager)
         profiles_menu.add_command(label="Variable Manager", command=self.open_variable_manager)
+        profiles_menu.add_command(label="Environment Templates", command=self.open_environment_templates,)
         menubar.add_cascade(label="Profiles", menu=profiles_menu)
 
         help_menu = Menu(menubar, tearoff=0)
