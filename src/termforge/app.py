@@ -739,6 +739,12 @@ class ChainBuilderWindow:
         self.value_text = Text(form, height=7, width=70, wrap="word")
         self.value_text.grid(row=1, column=1, sticky="nsew", pady=3)
 
+        self.profile_var = StringVar()
+        self.profile_menu = OptionMenu(form, self.profile_var, "")
+        self.profile_menu.config(width=38)
+        self.profile_menu.grid(row=1, column=1, sticky="w", pady=3)
+        self.profile_menu.grid_remove()
+
         self.hint_var = StringVar(value="")
         Label(form, textvariable=self.hint_var, anchor="w", fg="#333333").grid(row=2, column=1, sticky="w", pady=(0, 6))
 
@@ -844,7 +850,9 @@ class ChainBuilderWindow:
             self.hint_var.set('Enter a JSON list, e.g. ["path", "host"]')
         elif kind == "select_profile":
             self.value_label.config(text="Profile:")
-            self.hint_var.set("Enter a saved window profile name, e.g. server")
+            self.show_profile_dropdown()
+            self.hint_var.set("Choose a saved window profile.")
+            return
         elif kind == "sleep":
             self.value_label.config(text="Seconds:")
             self.hint_var.set("Enter a number, e.g. 1 or 0.5")
@@ -1007,6 +1015,37 @@ class ChainBuilderWindow:
                 "Ctrl+T         Edit Tags",
             ])
         )
+
+    def refresh_profile_menu(self):
+        profiles = self.app.get_window_profiles()
+        names = sorted(profiles.keys())
+
+        menu = self.profile_menu["menu"]
+        menu.delete(0, "end")
+
+        for name in names:
+            menu.add_command(
+                label=name,
+                command=lambda value=name: self.profile_var.set(value),
+            )
+
+        if names and self.profile_var.get() not in names:
+            self.profile_var.set(names[0])
+        elif not names:
+            self.profile_var.set("")
+
+
+    def show_value_text(self):
+        self.profile_menu.grid_remove()
+        self.value_text.grid()
+        self.value_label.config(anchor="nw")
+
+
+    def show_profile_dropdown(self):
+        self.value_text.grid_remove()
+        self.profile_menu.grid()
+        self.value_label.config(anchor="w")
+        self.refresh_profile_menu()
 
     def save_steps_as_template(self):
         if not self.steps:
@@ -1332,9 +1371,10 @@ class ChainBuilderWindow:
                 raise ValueError("vars value must be a JSON list.")
             return ["vars", parsed]
         if kind == "select_profile":
-            if not value:
+            profile_name = self.profile_var.get().strip()
+            if not profile_name:
                 raise ValueError("Profile name is required.")
-            return ["select_profile", value]
+            return ["select_profile", profile_name]
         if kind == "sleep":
             if not value:
                 raise ValueError("Sleep seconds are required.")
@@ -1471,7 +1511,8 @@ class ChainBuilderWindow:
                 self.value_text.insert("1.0", json.dumps(step[1], indent=2))
             elif step[0] == "select_profile":
                 self.kind_var.set("select_profile")
-                self.value_text.insert("1.0", str(step[1]))
+                self.refresh_profile_menu()
+                self.profile_var.set(str(step[1]))
             elif step[0] == "sleep":
                 self.kind_var.set("sleep")
                 self.value_text.insert("1.0", str(step[1]))
@@ -2563,7 +2604,19 @@ class ScheduleManagerWindow:
         self.time_var = StringVar()
         self.minutes_var = StringVar(value="1")
         self.enabled_var = IntVar(value=1)
+        self.profile_var = StringVar()
+        self.priority_var = StringVar(value="normal")
 
+        Label(form, text="Priority:", width=16, anchor="w").grid(row=4, column=0, sticky="w", pady=3)
+
+        self.priority_menu = OptionMenu(
+            form,
+            self.priority_var,
+            "critical",
+            "high",
+            "normal",
+            "low",
+        )
         Label(form, text="Name:", width=16, anchor="w").grid(row=0, column=0, sticky="w", pady=3)
         Entry(form, textvariable=self.name_var, width=42).grid(row=0, column=1, sticky="ew", pady=3)
 
@@ -2577,18 +2630,26 @@ class ScheduleManagerWindow:
         self.command_menu.config(width=38)
         self.command_menu.grid(row=2, column=1, sticky="w", pady=3)
 
-        Label(form, text="Type:", width=16, anchor="w").grid(row=3, column=0, sticky="w", pady=3)
+        Label(form, text="Profile:", width=16, anchor="w").grid(row=3, column=0, sticky="w", pady=3)
+        self.profile_menu = OptionMenu(form, self.profile_var, "")
+        self.profile_menu.config(width=38)
+        self.profile_menu.grid(row=3, column=1, sticky="w", pady=3)
+
+        self.priority_menu.config(width=38)
+        self.priority_menu.grid(row=4, column=1, sticky="w", pady=3)
+
+        Label(form, text="Type:", width=16, anchor="w").grid(row=5, column=0, sticky="w", pady=3)
         self.type_menu = OptionMenu(form, self.type_var, "startup", "daily", "interval_minutes")
         self.type_menu.config(width=38)
-        self.type_menu.grid(row=3, column=1, sticky="w", pady=3)
+        self.type_menu.grid(row=5, column=1, sticky="w", pady=3)
 
-        Label(form, text="Daily Time HH:MM:", width=16, anchor="w").grid(row=4, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.time_var, width=42).grid(row=4, column=1, sticky="ew", pady=3)
+        Label(form, text="Daily Time HH:MM:", width=16, anchor="w").grid(row=6, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.time_var, width=42).grid(row=6, column=1, sticky="ew", pady=3)
 
-        Label(form, text="Interval Minutes:", width=16, anchor="w").grid(row=5, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.minutes_var, width=42).grid(row=5, column=1, sticky="ew", pady=3)
+        Label(form, text="Interval Minutes:", width=16, anchor="w").grid(row=7, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.minutes_var, width=42).grid(row=7, column=1, sticky="ew", pady=3)
 
-        Checkbutton(form, text="Enabled", variable=self.enabled_var).grid(row=6, column=1, sticky="w", pady=3)
+        Checkbutton(form, text="Enabled", variable=self.enabled_var).grid(row=8, column=1, sticky="w", pady=3)
 
         self.info = Text(right, wrap="word", height=10)
         self.info.pack(fill=BOTH, expand=True, pady=(12, 0))
@@ -2600,6 +2661,7 @@ class ScheduleManagerWindow:
         self.category_var.trace_add("write", self.refresh_command_menu)
 
         self.refresh_category_menu()
+        self.refresh_profile_menu()
         self.refresh()
 
     def get_schedules(self):
@@ -2647,6 +2709,9 @@ class ScheduleManagerWindow:
             name = schedule.get("name", f"Schedule {idx + 1}")
             category = schedule.get("category", "")
             command = schedule.get("command", "")
+            profile = schedule.get("profile", "")
+            profile_text = f" profile:{profile}" if profile else ""
+            priority = schedule.get("priority", "normal")
             schedule_type = schedule.get("type", "")
             enabled = "ON" if schedule.get("enabled") else "OFF"
 
@@ -2660,8 +2725,10 @@ class ScheduleManagerWindow:
 
             label = (
                 f"[{enabled}] {name} — {schedule_type} — "
-                f"{category}/{command} — {status_text} — runs:{run_count}"
+                f"{category}/{command}{profile_text} — priority:{priority} — "
+                f"{status_text} — runs:{run_count}"
             )
+
             self.snapshot.append((idx, schedule))
             self.listbox.insert(END, label)
 
@@ -2685,6 +2752,8 @@ class ScheduleManagerWindow:
         self.refresh_command_menu()
 
         self.command_var.set(schedule.get("command", ""))
+        self.profile_var.set(schedule.get("profile", ""))
+        self.priority_var.set(schedule.get("priority", "normal"))
         self.type_var.set(schedule.get("type", "interval_minutes"))
         self.time_var.set(schedule.get("time", ""))
         self.minutes_var.set(str(schedule.get("minutes", "")))
@@ -2696,16 +2765,22 @@ class ScheduleManagerWindow:
     def clear_form(self):
         self.name_var.set("")
         self.type_var.set("interval_minutes")
+        self.profile_var.set("")
         self.time_var.set("")
         self.minutes_var.set("1")
         self.enabled_var.set(1)
         self.refresh_category_menu()
         self.listbox.selection_clear(0, END)
+        self.refresh_profile_menu()
 
     def build_schedule_from_form(self):
         name = self.name_var.get().strip()
         category = self.category_var.get().strip()
         command = self.command_var.get().strip()
+        profile = self.profile_var.get().strip()
+        priority = self.priority_var.get().strip().lower() or "normal"
+        if priority not in PRIORITY_ORDER:
+            priority = "normal"
         schedule_type = self.type_var.get().strip()
 
         if not name:
@@ -2719,6 +2794,8 @@ class ScheduleManagerWindow:
             "name": name,
             "category": category,
             "command": command,
+            "profile": profile,
+            "priority": priority,
             "type": schedule_type,
             "enabled": bool(self.enabled_var.get()),
         }
@@ -2739,6 +2816,23 @@ class ScheduleManagerWindow:
             schedule["minutes"] = minutes
 
         return schedule
+
+    def refresh_profile_menu(self):
+        profiles = self.app.get_window_profiles()
+        names = [""] + sorted(profiles.keys())
+
+        menu = self.profile_menu["menu"]
+        menu.delete(0, "end")
+
+        for name in names:
+            label = "(none)" if not name else name
+            menu.add_command(
+                label=label,
+                command=lambda value=name: self.profile_var.set(value),
+            )
+
+        if self.profile_var.get() not in names:
+            self.profile_var.set("")
 
     def selected_schedule_index(self):
         idxs = self.listbox.curselection()
@@ -6369,10 +6463,25 @@ class TermForgeApp:
             entry = categories[category][command]
             cmd_type, _cmd, _options = parse_command_entry(entry)
 
+            profile = schedule.get("profile", "").strip()
+
+            if profile:
+                self.log(f"Scheduled command selecting profile: {profile}")
+                self.select_window_profile(profile)
+
             self.set_status(f"Running scheduled command: {category}/{command}")
             self.log(f"Scheduled command queued: {category}/{command}")
 
-            self.enqueue_command(category, command, source="schedule")
+            priority = schedule.get("priority", "normal")
+            if priority not in PRIORITY_ORDER:
+                priority = "normal"
+
+            self.enqueue_command(
+                category,
+                command,
+                source="schedule",
+                priority=priority,
+            )
 
             schedule["_last_status"] = "success"
             schedule["_last_error"] = ""
@@ -6894,41 +7003,43 @@ class TermForgeApp:
 
         tools_menu = Menu(menubar, tearoff=0)
         tools_menu.add_command(label="Command Palette\tCtrl+P", command=self.open_command_palette)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Select Target Window", command=self.select_target_window_with_notice)
-        tools_menu.add_command(label="Reuse Saved Window", command=self.reuse_last_window)
-        tools_menu.add_command(label="Forget Saved Window", command=self.forget_saved_window)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="History", command=self.open_history_window)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Category Editor", command=self.open_category_editor)
         tools_menu.add_command(label="Command / Chain Editor", command=self.open_command_editor)
-        tools_menu.add_separator()
+        tools_menu.add_command(label="Category Editor", command=self.open_category_editor)
+        tools_menu.add_command(label="Tag Manager", command=self.open_tag_manager)
         tools_menu.add_command(label="Plugin Manager", command=self.open_plugin_manager)
-        tools_menu.add_command(label="Reload Plugins", command=self.reload_plugins_with_notice)
-        tools_menu.add_command(label="Open Plugin Folder", command=self.open_plugin_folder)
         tools_menu.add_separator()
         tools_menu.add_command(label="Hotkeys", command=self.show_hotkeys_help)
         tools_menu.add_command(label="Hotkey Editor", command=self.open_hotkey_editor)
         tools_menu.add_separator()
-        tools_menu.add_command(label="Schedule Manager", command=self.open_schedule_manager)
-        tools_menu.add_command(label="Schedule History", command=self.open_schedule_history)
-        tools_menu.add_command(label="Pause Scheduler", command=self.pause_scheduler)
-        tools_menu.add_command(label="Resume Scheduler", command=self.resume_scheduler)
-        tools_menu.add_command(label="Toggle Scheduler Pause", command=self.toggle_scheduler)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Backup Manager", command=self.open_backup_manager)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Tag Manager", command=self.open_tag_manager)
-        tools_menu.add_command(label="Profile Manager", command=self.open_profile_manager)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Execution Queue", command=self.open_execution_queue)
-        tools_menu.add_command(label="Pause Execution Queue", command=self.pause_execution_queue)
-        tools_menu.add_command(label="Resume Execution Queue", command=self.resume_execution_queue)
-        tools_menu.add_command(label="Toggle Execution Queue Pause", command=self.toggle_execution_queue_pause)
-        tools_menu.add_command(label="Config Health Check", command=self.open_config_health_check,)
-
+        tools_menu.add_command(label="Reload Plugins", command=self.reload_plugins_with_notice)
+        tools_menu.add_command(label="Open Plugin Folder", command=self.open_plugin_folder)
         menubar.add_cascade(label="Tools", menu=tools_menu)
+
+        automation_menu = Menu(menubar, tearoff=0)
+        automation_menu.add_command(label="Schedule Manager", command=self.open_schedule_manager)
+        automation_menu.add_command(label="Schedule History", command=self.open_schedule_history)
+        automation_menu.add_command(label="Execution Queue", command=self.open_execution_queue)
+        automation_menu.add_separator()
+        automation_menu.add_command(label="History", command=self.open_history_window)
+        automation_menu.add_separator()
+        automation_menu.add_command(label="Select Target Window", command=self.select_target_window_with_notice)
+        automation_menu.add_command(label="Reuse Saved Window", command=self.reuse_last_window)
+        automation_menu.add_command(label="Forget Saved Window", command=self.forget_saved_window)
+        automation_menu.add_separator()
+        automation_menu.add_command(label="Pause Scheduler", command=self.pause_scheduler)
+        automation_menu.add_command(label="Resume Scheduler", command=self.resume_scheduler)
+        automation_menu.add_command(label="Toggle Scheduler Pause", command=self.toggle_scheduler)
+        automation_menu.add_separator()
+        automation_menu.add_command(label="Pause Execution Queue", command=self.pause_execution_queue)
+        automation_menu.add_command(label="Resume Execution Queue", command=self.resume_execution_queue)
+        automation_menu.add_command(label="Toggle Execution Queue Pause", command=self.toggle_execution_queue_pause)
+        menubar.add_cascade(label="Automation", menu=automation_menu)
+
+        profiles_menu = Menu(menubar, tearoff=0)
+        profiles_menu.add_command(label="Profile Manager", command=self.open_profile_manager)
+        profiles_menu.add_command(label="Config Health Check", command=self.open_config_health_check,)
+        profiles_menu.add_command(label="Backup Manager", command=self.open_backup_manager)
+        menubar.add_cascade(label="Profiles", menu=profiles_menu)
 
         help_menu = Menu(menubar, tearoff=0)
         help_menu.add_command(label="About TermForge", command=self.show_about)
