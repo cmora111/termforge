@@ -118,6 +118,7 @@ def ensure_user_config() -> None:
         "SchedulerPaused = False",
         "BackupDir = str(CONFIG_DIR / 'backups')",
         "ExecutionHistory = []",
+        "Variables = {}",
         "",
     ]
     backup_dir = Path(getattr(cfg, "BackupDir", CONFIG_DIR / "backups"))
@@ -4526,6 +4527,152 @@ class ConfigHealthCheckWindow:
 
         messagebox.showinfo("Config Health Check", "Report copied to clipboard.")
 
+class VariableManagerWindow:
+    def __init__(self, app):
+        self.app = app
+        self.window = Toplevel(app.root)
+        self.window.title("Variable Manager")
+        self.window.geometry("860x520")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Variable Manager",
+            bd=4,
+            width=32,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(action_row, text="Save", width=14, bg="darkgreen", fg="white", command=self.save_variable).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Delete", width=14, bg="#7f6000", fg="white", command=self.delete_variable).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Refresh", width=14, bg="navy", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
+
+        body = Frame(outer)
+        body.pack(fill=BOTH, expand=True)
+
+        left = Frame(body)
+        left.pack(side=LEFT, fill=BOTH, expand=True)
+
+        right = Frame(body)
+        right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
+
+        self.listbox = Listbox(left, width=40, height=22, exportselection=False)
+        self.listbox.pack(side=LEFT, fill=BOTH, expand=True)
+
+        scrollbar = Scrollbar(left, command=self.listbox.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self.listbox.config(yscrollcommand=scrollbar.set)
+
+        form = Frame(right)
+        form.pack(fill=X)
+
+        Label(form, text="Name:", width=12, anchor="w").grid(row=0, column=0, sticky="w", pady=3)
+        self.name_var = StringVar()
+        Entry(form, textvariable=self.name_var, width=50).grid(row=0, column=1, sticky="ew", pady=3)
+
+        Label(form, text="Value:", width=12, anchor="nw").grid(row=1, column=0, sticky="nw", pady=3)
+        self.value_text = Text(form, height=5, width=60, wrap="word")
+        self.value_text.grid(row=1, column=1, sticky="nsew", pady=3)
+
+        form.columnconfigure(1, weight=1)
+
+        self.preview = Text(right, wrap="word", height=12)
+        self.preview.pack(fill=BOTH, expand=True, pady=(10, 0))
+
+        self.snapshot = []
+        self.listbox.bind("<<ListboxSelect>>", self.on_select)
+
+        self.refresh()
+
+    def refresh(self):
+        variables = self.app.get_variables()
+        self.snapshot = []
+
+        self.listbox.delete(0, END)
+
+        for name in sorted(variables.keys()):
+            value = variables.get(name, "")
+            self.snapshot.append((name, value))
+            self.listbox.insert(END, f"${{{name}}} = {value}")
+
+        self.preview.delete("1.0", END)
+        self.preview.insert(
+            "1.0",
+            "Use variables in commands, chains, and schedules:\n\n"
+            "  cd ${repo}\n"
+            "  ssh ${server}\n"
+            "  source ${venv}/bin/activate\n"
+        )
+
+    def selected_name(self):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return None
+        return self.snapshot[idxs[0]][0]
+
+    def on_select(self, _event=None):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return
+
+        name, value = self.snapshot[idxs[0]]
+
+        self.name_var.set(name)
+        self.value_text.delete("1.0", END)
+        self.value_text.insert("1.0", str(value))
+
+        self.preview.delete("1.0", END)
+        self.preview.insert(
+            "1.0",
+            f"Selected variable:\n\n"
+            f"Name: {name}\n"
+            f"Use as: ${{{name}}}\n\n"
+            f"Value:\n{value}"
+        )
+
+    def save_variable(self):
+        name = self.name_var.get().strip()
+        value = self.value_text.get("1.0", END).strip()
+
+        try:
+            self.app.set_variable(name, value)
+        except Exception as exc:
+            self.app.show_traceback_window("Save Variable Failed", exc)
+            return
+
+        self.app.set_status(f"Saved variable: {name}")
+        self.refresh()
+
+    def delete_variable(self):
+        name = self.name_var.get().strip() or self.selected_name()
+
+        if not name:
+            messagebox.showerror("Variable Manager", "Select or enter a variable first.")
+            return
+
+        if not messagebox.askokcancel("Delete Variable", f"Delete variable '{name}'?"):
+            return
+
+        try:
+            self.app.set_variable(name, "")
+        except Exception as exc:
+            self.app.show_traceback_window("Delete Variable Failed", exc)
+            return
+
+        self.name_var.set("")
+        self.value_text.delete("1.0", END)
+        self.app.set_status(f"Deleted variable: {name}")
+        self.refresh()
+
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
         self.root = root
@@ -4762,6 +4909,43 @@ class TermForgeApp:
         except Exception:
             return False
 
+    def open_variable_manager(self) -> None:
+        VariableManagerWindow(self)
+
+    def get_variables(self) -> dict:
+        variables = getattr(self.cfg, "Variables", {})
+        if not isinstance(variables, dict):
+            variables = {}
+            setattr(self.cfg, "Variables", variables)
+        return variables
+
+
+    def set_variable(self, name: str, value: str) -> None:
+        name = name.strip()
+        if not name:
+            raise TermForgeError("Variable name is required.")
+
+        variables = self.get_variables()
+
+        if value.strip():
+            variables[name] = value.strip()
+        else:
+            variables.pop(name, None)
+
+        setattr(self.cfg, "Variables", variables)
+        self.persist_full_config()
+
+    def resolve_config_variables(self, text: str) -> str:
+        if not isinstance(text, str):
+            return text
+
+        variables = self.get_variables()
+
+        def replace_var(match):
+            name = match.group(1)
+            return str(variables.get(name, match.group(0)))
+
+        return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", replace_var, text)
 
     def validate_window_profile(self, profile_name: str) -> dict:
         profiles = self.get_window_profiles()
@@ -6340,6 +6524,8 @@ class TermForgeApp:
                 if resolved_cmd is None:
                     return
 
+                resolved_cmd = self.resolve_config_variables(resolved_cmd)
+
             if not self.confirm_command(normalized, resolved_cmd, options):
                 self.set_status("Command cancelled by user.")
                 return
@@ -6864,6 +7050,7 @@ class TermForgeApp:
             scheduler_paused = getattr(self.cfg, "SchedulerPaused", False)
             categories = getattr(self.cfg, "Categories", {})
             execution_history = getattr(self.cfg, "ExecutionHistory", [])
+            variables = getattr(self.cfg, "Variables", {})
 
             lines = [
                 "# TermForge user configuration",
@@ -6884,6 +7071,7 @@ class TermForgeApp:
                 f"SchedulerPaused = {repr(bool(scheduler_paused))}",
                 f"Categories = {pprint.pformat(categories, indent=4)}",
                 f"ExecutionHistory = {pprint.pformat(execution_history, indent=4)}",
+                f"Variables = {pprint.pformat(variables, indent=4)}",
                 "",
             ]
             CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
@@ -7039,6 +7227,7 @@ class TermForgeApp:
         profiles_menu.add_command(label="Profile Manager", command=self.open_profile_manager)
         profiles_menu.add_command(label="Config Health Check", command=self.open_config_health_check,)
         profiles_menu.add_command(label="Backup Manager", command=self.open_backup_manager)
+        profiles_menu.add_command(label="Variable Manager", command=self.open_variable_manager)
         menubar.add_cascade(label="Profiles", menu=profiles_menu)
 
         help_menu = Menu(menubar, tearoff=0)
