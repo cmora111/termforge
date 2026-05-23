@@ -774,6 +774,7 @@ class ChainBuilderWindow:
             "  Ctrl+Alt+d   = Dry Run Preview with Value\n"
             "  <home>       = Move to Top\n"
             "  <end>        = Move to Bottom\n"
+            "  <delete>     = Delete step\n"
         )
         help_box.config(state="disabled")
 
@@ -787,6 +788,14 @@ class ChainBuilderWindow:
             bg="#2f5597",
             fg="white",
             command=self.insert_step_before,
+        ).pack(side=LEFT, padx=(0, 6))
+        Button(
+            btns,
+            text="Remove Step",
+            width=14,
+            bg="#7f6000",
+            fg="white",
+            command=self.remove_selected_step,
         ).pack(side=LEFT, padx=(0, 6))
         Button(
             btns,
@@ -841,6 +850,8 @@ class ChainBuilderWindow:
         self.window.bind_all("<End>", self.move_to_bottom_shortcut)
         self.listbox.bind("<Home>", self.move_to_top_shortcut)
         self.listbox.bind("<End>", self.move_to_bottom_shortcut)
+        self.window.bind("<Delete>", lambda _e: self.remove_selected_step())
+        self.listbox.bind("<Delete>", lambda _e: self.remove_selected_step())
         self.kind_var.trace_add("write", self.update_kind_ui)
         self.listbox.bind("<<ListboxSelect>>", self.on_select)
         self.update_kind_ui()
@@ -953,7 +964,6 @@ class ChainBuilderWindow:
 
         return None
 
-
     def move_to_top(self):
         i = self.get_selected_step_index()
         if i is None or i <= 0:
@@ -967,7 +977,6 @@ class ChainBuilderWindow:
         self.listbox.selection_set(0)
         self.listbox.activate(0)
         self.listbox.see(0)
-
 
     def move_to_bottom(self):
         i = self.get_selected_step_index()
@@ -1135,6 +1144,36 @@ class ChainBuilderWindow:
         self.listbox.activate(insert_index)
         self.listbox.see(insert_index)
 
+    def remove_selected_step(self):
+        index = self.get_selected_step_index()
+
+        if index is None:
+            messagebox.showerror("Chain Builder", "Select a step first.")
+            return
+
+        if index < 0 or index >= len(self.steps):
+            return
+
+        step = self.steps[index]
+
+        if not messagebox.askokcancel(
+            "Remove Step",
+            f"Remove this step?\n\n{step!r}",
+        ):
+            return
+
+        del self.steps[index]
+
+        self.refresh()
+
+        if self.steps:
+            new_index = min(index, len(self.steps) - 1)
+            self.listbox.selection_clear(0, END)
+            self.listbox.selection_set(new_index)
+            self.listbox.activate(new_index)
+            self.listbox.see(new_index)
+
+        self.value_text.delete("1.0", END)
 
     def append_template(self):
         steps = self.choose_chain_template()
@@ -2608,6 +2647,7 @@ class ScheduleManagerWindow:
         self.category_var = StringVar()
         self.command_var = StringVar()
         self.target_type_var = StringVar(value="command")
+        self.target_type_var.trace_add("write", self.update_target_type_ui)
         self.workflow_var = StringVar()
         self.type_var = StringVar(value="interval_minutes")
         self.time_var = StringVar()
@@ -2681,9 +2721,30 @@ class ScheduleManagerWindow:
         self.category_var.trace_add("write", self.refresh_command_menu)
 
         self.refresh_workflow_menu()
+        self.update_target_type_ui()
         self.refresh_category_menu()
         self.refresh_profile_menu()
         self.refresh()
+
+    def update_target_type_ui(self, *_args):
+        target_type = self.target_type_var.get().strip()
+
+        if target_type == "workflow":
+            try:
+                self.category_menu.config(state="disabled")
+                self.command_menu.config(state="disabled")
+                self.profile_menu.config(state="disabled")
+                self.workflow_menu.config(state="normal")
+            except Exception:
+                pass
+        else:
+            try:
+                self.category_menu.config(state="normal")
+                self.command_menu.config(state="normal")
+                self.profile_menu.config(state="normal")
+                self.workflow_menu.config(state="disabled")
+            except Exception:
+                pass
 
     def refresh_workflow_menu(self):
         workflows = self.app.get_workflows()
@@ -2790,6 +2851,8 @@ class ScheduleManagerWindow:
         self.refresh_command_menu()
 
         self.command_var.set(schedule.get("command", ""))
+        self.target_type_var.set(schedule.get("target_type", "command"))
+        self.update_target_type_ui()
         self.profile_var.set(schedule.get("profile", ""))
         self.priority_var.set(schedule.get("priority", "normal"))
         self.type_var.set(schedule.get("type", "interval_minutes"))
