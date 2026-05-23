@@ -2607,6 +2607,8 @@ class ScheduleManagerWindow:
         self.name_var = StringVar()
         self.category_var = StringVar()
         self.command_var = StringVar()
+        self.target_type_var = StringVar(value="command")
+        self.workflow_var = StringVar()
         self.type_var = StringVar(value="interval_minutes")
         self.time_var = StringVar()
         self.minutes_var = StringVar(value="1")
@@ -2624,39 +2626,50 @@ class ScheduleManagerWindow:
             "normal",
             "low",
         )
-        Label(form, text="Name:", width=16, anchor="w").grid(row=0, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.name_var, width=42).grid(row=0, column=1, sticky="ew", pady=3)
 
-        Label(form, text="Category:", width=16, anchor="w").grid(row=1, column=0, sticky="w", pady=3)
+        Label(form, text="Target Type:", width=16, anchor="w").grid(row=0, column=0, sticky="w", pady=3)
+        self.target_type_menu = OptionMenu(form, self.target_type_var, "command", "workflow")
+        self.target_type_menu.config(width=38)
+        self.target_type_menu.grid(row=0, column=1, sticky="w", pady=3)
+
+        Label(form, text="Name:", width=16, anchor="w").grid(row=1, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.name_var, width=42).grid(row=1, column=1, sticky="ew", pady=3)
+
+        Label(form, text="Category:", width=16, anchor="w").grid(row=2, column=0, sticky="w", pady=3)
         self.category_menu = OptionMenu(form, self.category_var, "")
         self.category_menu.config(width=38)
-        self.category_menu.grid(row=1, column=1, sticky="w", pady=3)
+        self.category_menu.grid(row=2, column=1, sticky="w", pady=3)
 
-        Label(form, text="Command:", width=16, anchor="w").grid(row=2, column=0, sticky="w", pady=3)
+        Label(form, text="Command:", width=16, anchor="w").grid(row=3, column=0, sticky="w", pady=3)
         self.command_menu = OptionMenu(form, self.command_var, "")
         self.command_menu.config(width=38)
-        self.command_menu.grid(row=2, column=1, sticky="w", pady=3)
+        self.command_menu.grid(row=3, column=1, sticky="w", pady=3)
 
-        Label(form, text="Profile:", width=16, anchor="w").grid(row=3, column=0, sticky="w", pady=3)
+        Label(form, text="Workflow:", width=16, anchor="w").grid(row=4, column=0, sticky="w", pady=3)
+        self.workflow_menu = OptionMenu(form, self.workflow_var, "")
+        self.workflow_menu.config(width=38)
+        self.workflow_menu.grid(row=4, column=1, sticky="w", pady=3)
+
+        Label(form, text="Profile:", width=16, anchor="w").grid(row=5, column=0, sticky="w", pady=3)
         self.profile_menu = OptionMenu(form, self.profile_var, "")
         self.profile_menu.config(width=38)
-        self.profile_menu.grid(row=3, column=1, sticky="w", pady=3)
+        self.profile_menu.grid(row=5, column=1, sticky="w", pady=3)
 
         self.priority_menu.config(width=38)
-        self.priority_menu.grid(row=4, column=1, sticky="w", pady=3)
+        self.priority_menu.grid(row=6, column=1, sticky="w", pady=3)
 
-        Label(form, text="Type:", width=16, anchor="w").grid(row=5, column=0, sticky="w", pady=3)
+        Label(form, text="Type:", width=16, anchor="w").grid(row=7, column=0, sticky="w", pady=3)
         self.type_menu = OptionMenu(form, self.type_var, "startup", "daily", "interval_minutes")
         self.type_menu.config(width=38)
-        self.type_menu.grid(row=5, column=1, sticky="w", pady=3)
+        self.type_menu.grid(row=7, column=1, sticky="w", pady=3)
 
-        Label(form, text="Daily Time HH:MM:", width=16, anchor="w").grid(row=6, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.time_var, width=42).grid(row=6, column=1, sticky="ew", pady=3)
+        Label(form, text="Daily Time HH:MM:", width=16, anchor="w").grid(row=8, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.time_var, width=42).grid(row=8, column=1, sticky="ew", pady=3)
 
-        Label(form, text="Interval Minutes:", width=16, anchor="w").grid(row=7, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.minutes_var, width=42).grid(row=7, column=1, sticky="ew", pady=3)
+        Label(form, text="Interval Minutes:", width=16, anchor="w").grid(row=9, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.minutes_var, width=42).grid(row=9, column=1, sticky="ew", pady=3)
 
-        Checkbutton(form, text="Enabled", variable=self.enabled_var).grid(row=8, column=1, sticky="w", pady=3)
+        Checkbutton(form, text="Enabled", variable=self.enabled_var).grid(row=10, column=1, sticky="w", pady=3)
 
         self.info = Text(right, wrap="word", height=10)
         self.info.pack(fill=BOTH, expand=True, pady=(12, 0))
@@ -2667,9 +2680,27 @@ class ScheduleManagerWindow:
         self.listbox.bind("<<ListboxSelect>>", self.on_select)
         self.category_var.trace_add("write", self.refresh_command_menu)
 
+        self.refresh_workflow_menu()
         self.refresh_category_menu()
         self.refresh_profile_menu()
         self.refresh()
+
+    def refresh_workflow_menu(self):
+        workflows = self.app.get_workflows()
+        names = [""] + sorted(workflows.keys())
+
+        menu = self.workflow_menu["menu"]
+        menu.delete(0, "end")
+
+        for name in names:
+            label = "(none)" if not name else name
+            menu.add_command(
+                label=label,
+                command=lambda value=name: self.workflow_var.set(value),
+            )
+
+        if self.workflow_var.get() not in names:
+            self.workflow_var.set("")
 
     def get_schedules(self):
         return self.app.get_schedules()
@@ -2782,8 +2813,10 @@ class ScheduleManagerWindow:
 
     def build_schedule_from_form(self):
         name = self.name_var.get().strip()
+        target_type = self.target_type_var.get().strip() or "command"
         category = self.category_var.get().strip()
         command = self.command_var.get().strip()
+        workflow = self.workflow_var.get().strip()
         profile = self.profile_var.get().strip()
         priority = self.priority_var.get().strip().lower() or "normal"
         if priority not in PRIORITY_ORDER:
@@ -2799,13 +2832,22 @@ class ScheduleManagerWindow:
 
         schedule = {
             "name": name,
+            "target_type": target_type,
             "category": category,
             "command": command,
+            "workflow": workflow,
             "profile": profile,
             "priority": priority,
             "type": schedule_type,
             "enabled": bool(self.enabled_var.get()),
         }
+
+        if target_type == "workflow":
+            if not workflow:
+                raise ValueError("Workflow schedule requires a workflow.")
+        else:
+            if not category or not command:
+                raise ValueError("Category and command are required.")
 
         if schedule_type == "daily":
             time_value = self.time_var.get().strip()
@@ -3012,6 +3054,9 @@ class ScheduleHistoryWindow:
         if not idxs:
             return
 
+        self.target_type_var.set(schedule.get("target_type", "command"))
+        self.workflow_var.set(schedule.get("workflow", ""))
+
         index = idxs[0]
         if index < 0 or index >= len(self.snapshot):
             return
@@ -3116,6 +3161,14 @@ class BackupManagerWindow:
                 END,
                 f'{item["modified"]} — {item["name"]} — {size_kb:.1f} KB'
             )
+
+        target_type = schedule.get("target_type", "command")
+        workflow = schedule.get("workflow", "")
+
+        if target_type == "workflow":
+            target_text = f"workflow/{workflow}"
+        else:
+            target_text = f"{category}/{command}"
 
         self.info.delete("1.0", END)
         if not self.snapshot:
@@ -3332,6 +3385,12 @@ class TagManagerWindow:
 
             tags_display = ", ".join(item["tags"]) if item["tags"] else "(untagged)"
             label = f'{item["category"]} -> {item["name"]}   [{tags_display}]'
+
+            label = (
+                f"[{enabled}] {name} — {schedule_type} — "
+                f"{target_text}{profile_text} — priority:{priority} — "
+                f"{status_text} — runs:{run_count}"
+            )
 
             self.snapshot.append(item)
             self.listbox.insert(END, label)
@@ -7582,25 +7641,58 @@ class TermForgeApp:
             entry = categories[category][command]
             cmd_type, _cmd, _options = parse_command_entry(entry)
 
-            profile = schedule.get("profile", "").strip()
-
-            if profile:
-                self.log(f"Scheduled command selecting profile: {profile}")
-                self.select_window_profile(profile)
-
-            self.set_status(f"Running scheduled command: {category}/{command}")
-            self.log(f"Scheduled command queued: {category}/{command}")
+            target_type = schedule.get("target_type", "command")
 
             priority = schedule.get("priority", "normal")
             if priority not in PRIORITY_ORDER:
                 priority = "normal"
 
-            self.enqueue_command(
-                category,
-                command,
-                source="schedule",
-                priority=priority,
-            )
+            if target_type == "workflow":
+
+                workflow_name = schedule.get("workflow", "").strip()
+
+                if not workflow_name:
+                    raise TermForgeError(
+                        "Workflow schedule requires a workflow name."
+                    )
+
+                self.log(
+                    f"Scheduled workflow queued: {workflow_name}"
+                )
+
+                self.enqueue_workflow(
+                    workflow_name,
+                    source="schedule",
+                    priority=priority,
+                )
+
+            else:
+
+                profile = schedule.get("profile", "").strip()
+
+                if profile:
+                    self.log(
+                        f"Scheduled command selecting profile: {profile}"
+                    )
+
+                    self.select_window_profile(profile)
+
+                self.set_status(
+                    f"Queueing scheduled command: "
+                    f"{category}/{command}"
+                )
+
+                self.log(
+                    f"Scheduled command queued: "
+                    f"{category}/{command}"
+                )
+
+                self.enqueue_command(
+                    category,
+                    command,
+                    source="schedule",
+                    priority=priority,
+                )
 
             schedule["_last_status"] = "success"
             schedule["_last_error"] = ""
