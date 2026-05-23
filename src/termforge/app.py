@@ -3740,13 +3740,18 @@ class ExecutionQueueWindow:
 
             priority = job.get("priority", "normal")
 
+            display_name = (
+                f'workflow/{job.get("workflow")}'
+                if job.get("kind") == "workflow"
+                else f'{job.get("category")}/{job.get("command")}'
+            )
+
             self.listbox.insert(
                 END,
                 f'{prefix}{index + 1}. '
                 f'[{priority}] '
                 f'[{job.get("source", "manual")}] '
-                f'{job.get("category")}/'
-                f'{job.get("command")} '
+                f'{display_name} '
                 f'@ {job.get("created_at", "")}'
             )
 
@@ -5055,6 +5060,7 @@ class WorkflowManagerWindow:
         Button(action_row, text="Save", width=14, bg="darkgreen", fg="white", command=self.save_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Run", width=14, bg="#2f5597", fg="white", command=self.run_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Validate", width=14, bg="#555577", fg="white", command=self.validate_workflow).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Queue", width=14, bg="#2f5597", fg="white", command=self.queue_workflow,).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Delete", width=14, bg="#7f6000", fg="white", command=self.delete_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Refresh", width=14, bg="navy", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
@@ -5151,6 +5157,31 @@ class WorkflowManagerWindow:
             raise ValueError("Workflow JSON must be a list.")
 
         return data
+
+    def queue_workflow(self):
+        name = self.name_var.get().strip()
+
+        if not name:
+            messagebox.showerror(
+                "Workflow Manager",
+                "Select or enter a workflow name.",
+            )
+            return
+
+        try:
+            self.app.enqueue_workflow(
+                name,
+                source="workflow-manager",
+                priority="normal",
+            )
+        except Exception as exc:
+            self.app.show_traceback_window(
+                "Queue Workflow Failed",
+                exc,
+            )
+            return
+
+        self.app.set_status(f"Queued workflow: {name}")
 
     def save_workflow(self):
         name = self.name_var.get().strip()
@@ -5435,6 +5466,40 @@ class TermForgeApp:
             self.root.quit()
         finally:
             self.root.destroy()
+
+    def enqueue_workflow(
+        self,
+        workflow_name: str,
+        source: str = "workflow",
+        priority: str = "normal",
+    ) -> None:
+        workflow_name = workflow_name.strip()
+
+        if workflow_name not in self.get_workflows():
+            raise TermForgeError(f"Unknown workflow: {workflow_name}")
+
+        if priority not in PRIORITY_ORDER:
+            priority = "normal"
+
+        job = {
+            "kind": "workflow",
+            "workflow": workflow_name,
+            "category": "workflow",
+            "command": workflow_name,
+            "source": source,
+            "priority": priority,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+        self.execution_queue.append(job)
+        self.add_execution_history(job, "queued", "")
+
+        self.set_status(
+            f"Queued workflow {workflow_name} "
+            f"({len(self.execution_queue)} pending)"
+        )
+
+        self.root.after(10, self.process_execution_queue)
 
     def get_workflows(self) -> dict:
         workflows = getattr(self.cfg, "Workflows", None)
@@ -6276,6 +6341,7 @@ class TermForgeApp:
             ) -> None:
 
         job = {
+            "kind": "command",
             "category": category,
             "command": command,
             "source": source,
@@ -6322,13 +6388,17 @@ class TermForgeApp:
         try:
             self.set_status(f"Running queued command: {category}/{command}")
             self.log(f"Queue running [{source}]: {category}/{command}")
-            self.add_completed_job(job, "success", "")
-            self.add_execution_history(job, "success", "")
 
             # direct execution path
-            self.select_cmd(None, category, command)
+            if job.get("kind") == "workflow":
+                workflow_name = job.get("workflow") or command
+                self.run_workflow(workflow_name, source=source)
+            else:
+                self.select_cmd(None, category, command) 
 
             self.log(f"Queue complete [{source}]: {category}/{command}")
+            self.add_completed_job(job, "success", "")
+            self.add_execution_history(job, "success", "")
 
         except Exception as exc:
             self.log(f"Queue failed [{source}]: {category}/{command}: {exc}")
