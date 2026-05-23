@@ -5183,6 +5183,7 @@ class WorkflowManagerWindow:
         Button(action_row, text="Run", width=14, bg="#2f5597", fg="white", command=self.run_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Validate", width=14, bg="#555577", fg="white", command=self.validate_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Queue", width=14, bg="#2f5597", fg="white", command=self.queue_workflow,).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Visualizer", width=14, bg="#555577", fg="white", command=self.visualize_workflow,).pack(side=LEFT, padx=(0,6))
         Button(action_row, text="Delete", width=14, bg="#7f6000", fg="white", command=self.delete_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Refresh", width=14, bg="navy", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
@@ -5280,6 +5281,27 @@ class WorkflowManagerWindow:
 
         return data
 
+    def visualize_workflow(self):
+        name = self.name_var.get().strip()
+
+        if not name:
+            messagebox.showerror(
+                "Workflow Manager",
+                "Select or enter a workflow name.",
+            )
+            return
+
+        try:
+            steps = self.parse_steps()
+        except Exception as exc:
+            self.app.show_traceback_window(
+                "Workflow Visualizer Failed",
+                exc,
+            )
+            return
+
+        WorkflowVisualizerWindow(self.app, name, steps)
+
     def queue_workflow(self):
         name = self.name_var.get().strip()
 
@@ -5369,6 +5391,168 @@ class WorkflowManagerWindow:
         self.name_var.set("")
         self.steps_text.delete("1.0", END)
         self.refresh()
+
+class WorkflowVisualizerWindow:
+    def __init__(self, app, workflow_name: str, steps: list):
+        self.app = app
+        self.workflow_name = workflow_name
+        self.steps = steps
+
+        self.window = Toplevel(app.root)
+        self.window.title(f"Workflow Visualizer — {workflow_name}")
+        self.window.geometry("980x640")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text=f"Workflow Visualizer — {workflow_name}",
+            bd=4,
+            width=46,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(
+            action_row,
+            text="Refresh",
+            width=14,
+            bg="navy",
+            fg="white",
+            command=self.refresh,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Copy",
+            width=14,
+            bg="#2f5597",
+            fg="white",
+            command=self.copy_report,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Close",
+            width=14,
+            bg="red",
+            fg="black",
+            command=self.window.destroy,
+        ).pack(side=RIGHT)
+
+        self.output = Text(
+            outer,
+            wrap="word",
+            width=120,
+            height=34,
+        )
+        self.output.pack(fill=BOTH, expand=True)
+
+        self.refresh()
+
+    def build_report(self) -> str:
+        lines = []
+        errors = self.app.validate_workflow(self.steps)
+
+        lines.append(f"Workflow: {self.workflow_name}")
+        lines.append("=" * 80)
+        lines.append("")
+
+        if errors:
+            lines.append("Validation Issues:")
+            for error in errors:
+                lines.append(f"  - {error}")
+            lines.append("")
+        else:
+            lines.append("Validation: OK")
+            lines.append("")
+
+        if not isinstance(self.steps, list):
+            lines.append("Workflow steps are not a list.")
+            return "\n".join(lines)
+
+        ids = []
+
+        for step in self.steps:
+            if isinstance(step, dict):
+                step_id = str(step.get("id", "")).strip()
+                if step_id:
+                    ids.append(step_id)
+
+        for index, step in enumerate(self.steps, start=1):
+            lines.append(f"{index}. Step")
+
+            if not isinstance(step, dict):
+                lines.append(f"   INVALID: {step!r}")
+                lines.append("")
+                continue
+
+            step_id = str(step.get("id", f"step-{index}")).strip()
+            depends_on = step.get("depends_on", [])
+
+            if isinstance(depends_on, str):
+                depends_on = [depends_on]
+
+            environment = step.get("environment", "")
+            profile = step.get("profile", "")
+            command = step.get("command", "")
+
+            lines.append(f"   id: {step_id}")
+            lines.append(
+                "   depends_on: "
+                + (", ".join(map(str, depends_on)) if depends_on else "none")
+            )
+
+            missing = [
+                dep for dep in depends_on
+                if dep not in ids
+            ]
+
+            if missing:
+                lines.append(
+                    "   dependency_status: MISSING "
+                    + ", ".join(map(str, missing))
+                )
+            else:
+                lines.append("   dependency_status: OK")
+
+            lines.append(f"   environment: {environment or '(none)'}")
+            lines.append(f"   profile: {profile or '(none)'}")
+
+            if isinstance(command, str):
+                lines.append(f"   command_ref: {command}")
+            else:
+                lines.append("   command:")
+                lines.append(
+                    pprint.pformat(command, indent=8)
+                )
+
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def refresh(self):
+        report = self.build_report()
+        self.output.delete("1.0", END)
+        self.output.insert("1.0", report)
+
+    def copy_report(self):
+        report = self.output.get("1.0", END).strip()
+
+        self.window.clipboard_clear()
+        self.window.clipboard_append(report)
+        self.window.update()
+
+        messagebox.showinfo(
+            "Workflow Visualizer",
+            "Workflow report copied to clipboard.",
+        )
 
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
