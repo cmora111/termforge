@@ -5184,6 +5184,7 @@ class WorkflowManagerWindow:
         Button(action_row, text="Validate", width=14, bg="#555577", fg="white", command=self.validate_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Queue", width=14, bg="#2f5597", fg="white", command=self.queue_workflow,).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Visualizer", width=14, bg="#555577", fg="white", command=self.visualize_workflow,).pack(side=LEFT, padx=(0,6))
+        Button(action_row, text="Retry From Step", width=16, bg="#2f5597", fg="white", command=self.retry_from_step,).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Delete", width=14, bg="#7f6000", fg="white", command=self.delete_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Refresh", width=14, bg="navy", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
@@ -5280,6 +5281,72 @@ class WorkflowManagerWindow:
             raise ValueError("Workflow JSON must be a list.")
 
         return data
+
+    def retry_from_step(self):
+        name = self.name_var.get().strip()
+
+        if not name:
+            messagebox.showerror(
+                "Workflow Manager",
+                "Select or enter a workflow name.",
+            )
+            return
+
+        try:
+            steps = self.parse_steps()
+        except Exception as exc:
+            self.app.show_traceback_window(
+                "Retry Workflow Failed",
+                exc,
+            )
+            return
+
+        ids = [
+            str(step.get("id", "")).strip()
+            for step in steps
+            if isinstance(step, dict) and str(step.get("id", "")).strip()
+        ]
+
+        if not ids:
+            messagebox.showerror(
+                "Workflow Manager",
+                "Workflow has no step ids.",
+            )
+            return
+
+        prompt = MultiFieldPrompt(
+            self.window,
+            "Retry Workflow From Step",
+            ["step_id"],
+            defaults={"step_id": ids[0]},
+            heading="Enter step id to retry from",
+        )
+
+        values = prompt.show()
+        if values is None:
+            return
+
+        step_id = values.get("step_id", "").strip()
+
+        if step_id not in ids:
+            messagebox.showerror(
+                "Workflow Manager",
+                "Unknown step id.\n\nAvailable:\n"
+                + "\n".join(ids),
+            )
+            return
+
+        try:
+            self.app.run_workflow(
+                name,
+                source="workflow-retry",
+                start_at=step_id,
+            )
+        except Exception as exc:
+            self.app.show_traceback_window(
+                "Retry Workflow Failed",
+                exc,
+            )
 
     def visualize_workflow(self):
         name = self.name_var.get().strip()
@@ -5889,7 +5956,13 @@ class TermForgeApp:
         return errors
 
 
-    def run_workflow(self, name: str, source: str = "workflow") -> None:
+    def run_workflow(
+        self,
+        name: str,
+        source: str = "workflow",
+        start_at: str | None = None,
+    ) -> None:
+
         workflows = self.get_workflows()
         steps = workflows.get(name)
 
@@ -5903,12 +5976,23 @@ class TermForgeApp:
         completed = set()
         failed = set()
 
+        start_found = start_at is None
+
         total = len(steps)
         runner = self.get_chain_runner(total)
         runner.log("──", f"Workflow started — {name}")
 
         for index, step in enumerate(steps, start=1):
             step_id = str(step.get("id", f"step-{index}")).strip()
+
+            if not start_found:
+                if step_id == start_at:
+                    start_found = True
+                else:
+                    completed.add(step_id)
+                    runner.step_done(f"Skipped before retry start: {step_id}")
+                    continue
+
             depends_on = step.get("depends_on", [])
 
             if isinstance(depends_on, str):
