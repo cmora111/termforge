@@ -5562,6 +5562,8 @@ class WorkflowVisualizerWindow:
 
             step_id = str(step.get("id", f"step-{index}")).strip()
             depends_on = step.get("depends_on", [])
+            lines.append(f"   run_if: {run_if}")
+            run_if = str(step.get("run_if", "always")).strip().lower() or "always"
 
             if isinstance(depends_on, str):
                 depends_on = [depends_on]
@@ -5933,6 +5935,13 @@ class TermForgeApp:
             if isinstance(depends_on, str):
                 depends_on = [depends_on]
 
+            run_if = str(step.get("run_if", "always")).strip().lower()
+
+            if run_if not in ("always", "success", "failed", "never"):
+                errors.append(
+                    f"Step {index}: run_if must be always, success, failed, or never."
+                )
+
             if not isinstance(depends_on, list):
                 errors.append(f"Step {index}: depends_on must be a list or string.")
 
@@ -5995,14 +6004,34 @@ class TermForgeApp:
 
             depends_on = step.get("depends_on", [])
 
+            run_if = str(step.get("run_if", "always")).strip().lower() or "always"
+
             if isinstance(depends_on, str):
                 depends_on = [depends_on]
 
-            missing = [dep for dep in depends_on if dep not in completed]
+            missing = [
+                dep for dep in depends_on
+                if dep not in completed and dep not in failed
+            ]
+
             if missing:
-                message = f"Skipped {step_id}; unmet dependencies: {missing}"
+                message = f"Skipped {step_id}; unknown/unmet dependencies: {missing}"
                 runner.step_failed(message)
                 failed.add(step_id)
+                continue
+
+            dep_failed = any(dep in failed for dep in depends_on)
+
+            if run_if == "never":
+                runner.step_done(f"Skipped by run_if=never: {step_id}")
+                continue
+
+            if run_if == "success" and dep_failed:
+                runner.step_done(f"Skipped because dependency failed: {step_id}")
+                continue
+
+            if run_if == "failed" and not dep_failed:
+                runner.step_done(f"Skipped because no dependency failed: {step_id}")
                 continue
 
             environment = step.get("environment", "")
@@ -6053,7 +6082,7 @@ class TermForgeApp:
                     f"Workflow Step Failed: {name}/{step_id}",
                     exc,
                 )
-                break
+                continue
 
         self.add_history_entry(
             "workflow",
