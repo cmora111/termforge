@@ -123,6 +123,7 @@ def ensure_user_config() -> None:
         "Variables = {}",
         "EnvironmentTemplates = {}",
         "Workflows = {}",
+        "Backend = x11",
         "",
     ]
     backup_dir = Path(getattr(cfg, "BackupDir", CONFIG_DIR / "backups"))
@@ -5941,6 +5942,235 @@ class SubprocessBackend:
                 source="backend",
             )
 
+class X11Backend:
+    name = "x11"
+    label = "X11 / xdotool / libxdo"
+    description = (
+        "Uses the current X11 target-window behavior. "
+        "Best for Ubuntu Xorg/X11 sessions."
+    )
+
+    def __init__(self, app):
+        self.app = app
+
+    def is_available(self) -> bool:
+        return shutil.which("xdotool") is not None
+
+    def select_target(self):
+        return self.app.select_target_window()
+
+    def send_text(self, text: str, record_history: bool = True):
+        return self.app.send_to_selected_window(
+            text,
+            record_history=record_history,
+        )
+
+    def run_detached(self, command: str, record_history: bool = True):
+        return self.app.run_detached(
+            command,
+            record_history=record_history,
+        )
+
+
+class SubprocessBackend:
+    name = "subprocess"
+    label = "Subprocess / Direct Shell"
+    description = (
+        "Runs commands directly with subprocess. "
+        "Works across X11, Wayland, GNOME Shell, SSH sessions, and headless use. "
+        "Does not type into a selected terminal window."
+    )
+
+    def __init__(self, app):
+        self.app = app
+
+    def is_available(self) -> bool:
+        return True
+
+    def select_target(self):
+        self.app.set_status(
+            "Subprocess backend does not use target windows."
+        )
+
+    def send_text(self, text: str, record_history: bool = True):
+        return self.run_detached(
+            text,
+            record_history=record_history,
+        )
+
+    def run_detached(self, command: str, record_history: bool = True):
+        proc = subprocess.Popen(command, shell=True)
+
+        self.app.current_process = proc
+        self.app.current_process_job = {
+            "category": "",
+            "command": command,
+            "source": "subprocess",
+            "pid": proc.pid,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+        self.app.set_status(
+            f"Started subprocess PID {proc.pid}"
+        )
+
+        if record_history:
+            self.app.add_history_entry(
+                "subprocess",
+                command,
+                source="backend",
+            )
+
+class BackendManagerWindow:
+    def __init__(self, app):
+        self.app = app
+        self.window = Toplevel(app.root)
+        self.window.title("Backend Manager")
+        self.window.geometry("840x480")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Backend Manager",
+            bd=4,
+            width=32,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(
+            action_row,
+            text="Apply Backend",
+            width=16,
+            bg="darkgreen",
+            fg="white",
+            command=self.apply_backend,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Test Backend",
+            width=14,
+            bg="#2f5597",
+            fg="white",
+            command=self.test_backend,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Close",
+            width=14,
+            bg="red",
+            fg="black",
+            command=self.window.destroy,
+        ).pack(side=RIGHT)
+
+        self.backend_var = StringVar(value=app.get_backend_name())
+
+        body = Frame(outer)
+        body.pack(fill=BOTH, expand=True)
+
+        Label(
+            body,
+            text="Backend:",
+            width=14,
+            anchor="w",
+        ).pack(anchor="w")
+
+        self.backend_menu = OptionMenu(
+            body,
+            self.backend_var,
+            "x11",
+            "subprocess",
+        )
+        self.backend_menu.config(width=32)
+        self.backend_menu.pack(anchor="w", pady=(0, 8))
+
+        self.info = Text(body, wrap="word", height=18)
+        self.info.pack(fill=BOTH, expand=True)
+
+        self.refresh_info()
+
+    def refresh_info(self):
+        current = self.app.get_backend_name()
+
+        x11 = X11Backend(self.app)
+        subprocess_backend = SubprocessBackend(self.app)
+
+        lines = [
+            f"Current backend: {current}",
+            "",
+            "Available backends:",
+            "",
+            f"x11:",
+            f"  Label: {x11.label}",
+            f"  Available: {x11.is_available()}",
+            f"  Description: {x11.description}",
+            "",
+            f"subprocess:",
+            f"  Label: {subprocess_backend.label}",
+            f"  Available: {subprocess_backend.is_available()}",
+            f"  Description: {subprocess_backend.description}",
+            "",
+            "Notes:",
+            "- x11 preserves the classic TermForge selected-window behavior.",
+            "- subprocess is cross-desktop and Wayland-friendly.",
+            "- subprocess runs commands directly instead of typing into a terminal.",
+        ]
+
+        self.info.delete("1.0", END)
+        self.info.insert("1.0", "\n".join(lines))
+
+    def apply_backend(self):
+        name = self.backend_var.get().strip()
+
+        try:
+            self.app.set_backend_name(name)
+        except Exception as exc:
+            self.app.show_traceback_window("Apply Backend Failed", exc)
+            return
+
+        self.refresh_info()
+
+    def test_backend(self):
+        name = self.backend_var.get().strip()
+
+        try:
+            self.app.set_backend_name(name)
+
+            if name == "subprocess":
+                self.app.backend.run_detached(
+                    "echo TERMFORGE_BACKEND_TEST >> /tmp/termforge-backend-test.log",
+                    record_history=True,
+                )
+
+                messagebox.showinfo(
+                    "Backend Test",
+                    "Subprocess backend test launched.\n\n"
+                    "Check:\n/tmp/termforge-backend-test.log",
+                )
+
+            else:
+                self.app.backend.select_target()
+
+                messagebox.showinfo(
+                    "Backend Test",
+                    "X11 backend selected.\n\n"
+                    "Try sending a command to the selected window.",
+                )
+
+        except Exception as exc:
+            self.app.show_traceback_window("Backend Test Failed", exc)
+
+        self.refresh_info()
+
 
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
@@ -5974,6 +6204,8 @@ class TermForgeApp:
         self.current_process = None
         self.current_process_job = None
         self.current_environment = None
+
+        self.backend = self.create_backend()
 
         if self.debug:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -6160,6 +6392,35 @@ class TermForgeApp:
             self.root.quit()
         finally:
             self.root.destroy()
+
+    def get_backend_name(self) -> str:
+        return str(getattr(self.cfg, "Backend", "x11") or "x11")
+
+
+    def set_backend_name(self, name: str) -> None:
+        name = str(name).strip().lower()
+
+        if name not in ("x11", "subprocess"):
+            raise TermForgeError(f"Unknown backend: {name}")
+
+        setattr(self.cfg, "Backend", name)
+        self.backend = self.create_backend()
+        self.persist_full_config()
+
+        self.set_status(f"Backend selected: {name}")
+
+
+    def create_backend(self):
+        name = self.get_backend_name()
+
+        if name == "subprocess":
+            return SubprocessBackend(self)
+
+        return X11Backend(self)
+
+
+    def open_backend_manager(self):
+        BackendManagerWindow(self)
 
     def workflow_step_can_run(self, step: dict, completed: set, failed: set) -> bool:
         depends_on = step.get("depends_on", [])
@@ -8393,82 +8654,79 @@ class TermForgeApp:
         record_history: bool = True,
         shared_vars: dict[str, str] | None = None,
     ) -> None:
-
         if options is None:
             options = {}
 
-        if normalized in (0, "select"):
-            self.backend.select_target()
+        normalized = cmd_type
+        if isinstance(cmd_type, str):
+            normalized = cmd_type.strip().lower()
 
-        elif normalized in (2, "command", "send"):
-            self.backend.send_text(
-                str(resolved_cmd),
-                record_history=record_history,
-            )
-
-        elif normalized in (3, "detached"):
-            self.backend.run_detached(
-                str(resolved_cmd),
-                record_history=record_history,
-            )
-
-        if isinstance(cmd, str) and self.is_dangerous_command(cmd):
-            if not options.get("confirm", False):
-                if not self.confirm_dangerous_command(cmd):
-                    self.set_status("Command cancelled.")
-                    return
         try:
-            if options is None:
-                options = {}
-            normalized = cmd_type
-            if isinstance(cmd_type, str):
-                normalized = cmd_type.strip().lower()
-
             if normalized == "chain":
                 self.run_chain(cmd, source="chain")
                 return
 
             resolved_cmd = cmd
-            if normalized in (1, 2, 3, "spawn", "command", "send", "detached") and isinstance(cmd, str):
-                resolved_cmd = self.resolve_command_placeholders(cmd, shared_vars=shared_vars)
+
+            if (
+                normalized in (1, 2, 3, "spawn", "command", "send", "detached")
+                and isinstance(cmd, str)
+            ):
+                resolved_cmd = self.resolve_command_placeholders(
+                    cmd,
+                    shared_vars=shared_vars,
+                )
+
                 if resolved_cmd is None:
                     return
 
-                resolved_cmd = self.resolve_environment_variables(resolved_cmd, self.get_current_environment(),)
+                resolved_cmd = self.resolve_environment_variables(
+                    resolved_cmd,
+                    self.get_current_environment(),
+                )
+
+            if isinstance(resolved_cmd, str) and self.is_dangerous_command(resolved_cmd):
+                if not options.get("confirm", False):
+                    if not self.confirm_dangerous_command(resolved_cmd):
+                        self.set_status("Command cancelled.")
+                        return
 
             if not self.confirm_command(normalized, resolved_cmd, options):
                 self.set_status("Command cancelled by user.")
                 return
 
+            if not hasattr(self, "backend") or self.backend is None:
+                self.backend = self.create_backend()
+
             if normalized in (0, "select"):
-                self.select_target_window()
+                self.backend.select_target()
+
             elif normalized in (1, "spawn"):
-                self.spawn_terminal(str(resolved_cmd), record_history=record_history)
+                self.spawn_terminal(
+                    str(resolved_cmd),
+                    record_history=record_history,
+                )
+
             elif normalized in (2, "command", "send"):
-                self.send_to_selected_window(str(resolved_cmd), record_history=record_history)
+                self.backend.send_text(
+                    str(resolved_cmd),
+                    record_history=record_history,
+                )
+
             elif normalized in (3, "detached"):
-                proc = subprocess.Popen(str(resolved_cmd), shell=True)
+                self.backend.run_detached(
+                    str(resolved_cmd),
+                    record_history=record_history,
+                )
 
-                self.current_process = proc
-
-                self.current_process_job = {
-                    "category": "",
-                    "command": str(resolved_cmd),
-                    "source": "detached",
-                    "pid": proc.pid,
-                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                }
-
-                self.set_status(f"Started detached process PID {proc.pid}")
-
-                if record_history:
-                    self.add_history_entry("detatched", str(resolved_cmd), source="manual")
             elif normalized == "plugin":
                 self.run_plugin(cmd)
+
             else:
                 raise TermForgeError(f"Unknown command type: {cmd_type}")
+
         except Exception as exc:
-            self.show_traceback_window(f"Command failed", str(exc))
+            self.show_traceback_window("Command failed", exc)
 
     def poll_current_process(self) -> None:
         proc = getattr(self, "current_process", None)
@@ -9000,6 +9258,7 @@ class TermForgeApp:
             variables = getattr(self.cfg, "Variables", {})
             environment_templates = getattr(self.cfg, "EnvironmentTemplates", {},)
             workflows = getattr(self.cfg, "Workflows", {})
+            backend = getattr(self.cfg, "Backend", "x11")
 
             lines = [
                 "# TermForge user configuration",
@@ -9023,6 +9282,7 @@ class TermForgeApp:
                 f"Variables = {pprint.pformat(variables, indent=4)}",
                 f"EnvironmentTemplates = {pprint.pformat(environment_templates, indent=4)}",
                 f"Workflows = {pprint.pformat(workflows, indent=4)}",
+                f"Backend = {repr(backend)}",
                 "",
             ]
             CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
@@ -9177,6 +9437,7 @@ class TermForgeApp:
         menubar.add_cascade(label="Automation", menu=automation_menu)
 
         profiles_menu = Menu(menubar, tearoff=0)
+        profiles_menu.add_command(label="Backend Manager", command=self.open_backend_manager,)
         profiles_menu.add_command(label="Profile Manager", command=self.open_profile_manager)
         profiles_menu.add_command(label="Config Health Check", command=self.open_config_health_check,)
         profiles_menu.add_command(label="Backup Manager", command=self.open_backup_manager)
