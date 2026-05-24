@@ -5887,6 +5887,60 @@ class WorkflowVisualizerWindow:
     </body>
     </html>
     """
+class X11Backend:
+    name = "x11"
+
+    def __init__(self, app):
+        self.app = app
+
+    def select_target(self):
+        return self.app.select_target_window()
+
+    def send_text(self, text: str, record_history: bool = True):
+        return self.app.send_to_selected_window(
+            text,
+            record_history=record_history,
+        )
+
+    def run_detached(self, command: str, record_history: bool = True):
+        return self.app.run_detached(
+            command,
+            record_history=record_history,
+        )
+
+class SubprocessBackend:
+    name = "subprocess"
+
+    def __init__(self, app):
+        self.app = app
+
+    def select_target(self):
+        self.app.set_status("Subprocess backend does not use target windows.")
+
+    def send_text(self, text: str, record_history: bool = True):
+        return self.run_detached(text, record_history=record_history)
+
+    def run_detached(self, command: str, record_history: bool = True):
+        proc = subprocess.Popen(command, shell=True)
+
+        self.app.current_process = proc
+        self.app.current_process_job = {
+            "category": "",
+            "command": command,
+            "source": "subprocess",
+            "pid": proc.pid,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+        self.app.set_status(f"Started subprocess PID {proc.pid}")
+
+        if record_history:
+            self.app.add_history_entry(
+                "subprocess",
+                command,
+                source="backend",
+            )
+
 
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
@@ -8342,6 +8396,21 @@ class TermForgeApp:
 
         if options is None:
             options = {}
+
+        if normalized in (0, "select"):
+            self.backend.select_target()
+
+        elif normalized in (2, "command", "send"):
+            self.backend.send_text(
+                str(resolved_cmd),
+                record_history=record_history,
+            )
+
+        elif normalized in (3, "detached"):
+            self.backend.run_detached(
+                str(resolved_cmd),
+                record_history=record_history,
+            )
 
         if isinstance(cmd, str) and self.is_dangerous_command(cmd):
             if not options.get("confirm", False):
