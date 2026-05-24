@@ -10,6 +10,8 @@ import time
 import copy
 import traceback
 import shutil
+import html
+import webbrowser
 from datetime import datetime
 
 try:
@@ -5518,6 +5520,15 @@ class WorkflowVisualizerWindow:
 
         Button(
             action_row,
+            text="Export HTML",
+            width=14,
+            bg="#3d6d3d",
+            fg="white",
+            command=self.export_html,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
             text="Close",
             width=14,
             bg="red",
@@ -5574,15 +5585,17 @@ class WorkflowVisualizerWindow:
 
             step_id = str(step.get("id", f"step-{index}")).strip()
             depends_on = step.get("depends_on", [])
-            lines.append(f"   run_if: {run_if}")
-            run_if = str(step.get("run_if", "always")).strip().lower() or "always"
 
             if isinstance(depends_on, str):
                 depends_on = [depends_on]
 
+            run_if = str(step.get("run_if", "always")).strip().lower() or "always"
+
             environment = step.get("environment", "")
             profile = step.get("profile", "")
             command = step.get("command", "")
+
+            lines.append(f"   run_if: {run_if}")
 
             lines.append(f"   id: {step_id}")
             lines.append(
@@ -5634,6 +5647,227 @@ class WorkflowVisualizerWindow:
             "Workflow Visualizer",
             "Workflow report copied to clipboard.",
         )
+
+    def export_html(self):
+        target = filedialog.asksaveasfilename(
+            title="Export Workflow Graph HTML",
+            defaultextension=".html",
+            initialfile=f"workflow_{self.workflow_name}.html",
+            filetypes=[
+                ("HTML files", "*.html"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if not target:
+            return
+
+        html_text = self.build_html()
+
+        Path(target).write_text(html_text, encoding="utf-8")
+
+        try:
+            webbrowser.open(Path(target).as_uri())
+        except Exception:
+            pass
+
+        messagebox.showinfo(
+            "Workflow Visualizer",
+            f"Exported workflow graph to:\n\n{target}",
+        )
+
+    def build_html(self) -> str:
+        errors = self.app.validate_workflow(self.steps)
+
+        node_blocks = []
+        edge_blocks = []
+
+        id_set = set()
+
+        if isinstance(self.steps, list):
+            for step in self.steps:
+                if isinstance(step, dict):
+                    step_id = str(step.get("id", "")).strip()
+                    if step_id:
+                        id_set.add(step_id)
+
+        if isinstance(self.steps, list):
+            for index, step in enumerate(self.steps, start=1):
+                if not isinstance(step, dict):
+                    step_id = f"invalid_{index}"
+                    label = f"Invalid step {index}"
+                    command_text = repr(step)
+                    depends_on = []
+                    run_if = "always"
+                    environment = ""
+                    profile = ""
+                else:
+                    step_id = str(step.get("id", f"step-{index}")).strip()
+                    label = step_id
+                    command = step.get("command", "")
+                    command_text = (
+                        command
+                        if isinstance(command, str)
+                        else pprint.pformat(command, indent=4)
+                    )
+                    depends_on = step.get("depends_on", [])
+                    run_if = str(step.get("run_if", "always")).strip() or "always"
+                    environment = step.get("environment", "")
+                    profile = step.get("profile", "")
+
+                    if isinstance(depends_on, str):
+                        depends_on = [depends_on]
+
+                safe_id = html.escape(step_id)
+                safe_label = html.escape(label)
+                safe_command = html.escape(str(command_text))
+                safe_run_if = html.escape(str(run_if))
+                safe_environment = html.escape(str(environment))
+                safe_profile = html.escape(str(profile))
+
+                node_blocks.append(
+                    f"""
+                    <div class="node" id="node-{safe_id}">
+                      <div class="node-title">{index}. {safe_label}</div>
+                      <div class="meta">run_if: <b>{safe_run_if}</b></div>
+                      <div class="meta">environment: {safe_environment or "<span class='muted'>(none)</span>"}</div>
+                      <div class="meta">profile: {safe_profile or "<span class='muted'>(none)</span>"}</div>
+                      <pre>{safe_command}</pre>
+                    </div>
+                    """
+                )
+
+                for dep in depends_on:
+                    dep_text = str(dep)
+                    edge_class = "edge"
+                    if dep_text not in id_set:
+                        edge_class += " missing"
+
+                    edge_blocks.append(
+                        f"""
+                        <div class="{edge_class}">
+                          <span>{html.escape(dep_text)}</span>
+                          <span class="arrow">→</span>
+                          <span>{safe_label}</span>
+                        </div>
+                        """
+                    )
+
+        error_html = ""
+        if errors:
+            error_items = "\n".join(
+                f"<li>{html.escape(str(error))}</li>"
+                for error in errors
+            )
+            error_html = f"""
+            <section class="errors">
+              <h2>Validation Issues</h2>
+              <ul>{error_items}</ul>
+            </section>
+            """
+
+        return f"""<!doctype html>
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <title>Workflow Graph — {html.escape(self.workflow_name)}</title>
+    <style>
+    body {{
+        font-family: Arial, sans-serif;
+        margin: 24px;
+        background: #f5f7fa;
+        color: #222;
+    }}
+    h1 {{
+        margin-bottom: 4px;
+    }}
+    .subtitle {{
+        color: #666;
+        margin-bottom: 24px;
+    }}
+    .layout {{
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 18px;
+    }}
+    .panel {{
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        padding: 14px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }}
+    .node {{
+        border-left: 6px solid #2f5597;
+        background: #fff;
+        border-radius: 10px;
+        margin: 12px 0;
+        padding: 12px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    }}
+    .node-title {{
+        font-weight: bold;
+        font-size: 18px;
+        margin-bottom: 8px;
+    }}
+    .meta {{
+        color: #555;
+        margin: 3px 0;
+    }}
+    pre {{
+        background: #f0f0f0;
+        padding: 10px;
+        border-radius: 8px;
+        white-space: pre-wrap;
+        overflow-x: auto;
+    }}
+    .edge {{
+        padding: 8px 10px;
+        margin: 8px 0;
+        background: #eef4ff;
+        border-radius: 8px;
+        border-left: 4px solid #2f5597;
+    }}
+    .edge.missing {{
+        background: #ffecec;
+        border-left-color: #aa3333;
+    }}
+    .arrow {{
+        margin: 0 8px;
+        font-weight: bold;
+    }}
+    .errors {{
+        background: #fff3f3;
+        border: 1px solid #ffcccc;
+        border-radius: 10px;
+        padding: 12px;
+        margin-bottom: 18px;
+    }}
+    .muted {{
+        color: #888;
+    }}
+    </style>
+    </head>
+    <body>
+    <h1>Workflow Graph — {html.escape(self.workflow_name)}</h1>
+    <div class="subtitle">Generated by TermForge</div>
+
+    {error_html}
+
+    <div class="layout">
+      <section class="panel">
+        <h2>Steps</h2>
+        {''.join(node_blocks)}
+      </section>
+
+      <section class="panel">
+        <h2>Dependencies</h2>
+        {''.join(edge_blocks) if edge_blocks else "<p class='muted'>No dependencies.</p>"}
+      </section>
+    </div>
+    </body>
+    </html>
+    """
 
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
