@@ -3099,10 +3099,22 @@ class ScheduleHistoryWindow:
             timestamp = entry.get("timestamp", "")
             status = entry.get("status", "")
             name = entry.get("name", "")
-            category = entry.get("category", "")
-            command = entry.get("command", "")
+            target_type = entry.get("target_type", "command")
+            priority = entry.get("priority", "normal")
+            profile = entry.get("profile", "")
 
-            label = f"{timestamp} [{status}] {name} — {category}/{command}"
+            if target_type == "workflow":
+                target = f"workflow/{entry.get('workflow', '')}"
+            else:
+                target = f"{entry.get('category', '')}/{entry.get('command', '')}"
+
+            profile_text = f" profile:{profile}" if profile else ""
+
+            label = (
+                f"{timestamp} [{status}] [{priority}] "
+                f"{name} — {target}{profile_text}"
+            )
+
             self.snapshot.append(entry)
             self.listbox.insert(END, label)
 
@@ -7958,8 +7970,12 @@ class TermForgeApp:
         history.insert(0, {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "name": schedule.get("name", ""),
+            "target_type": schedule.get("target_type", "command"),
             "category": schedule.get("category", ""),
             "command": schedule.get("command", ""),
+            "workflow": schedule.get("workflow", ""),
+            "profile": schedule.get("profile", ""),
+            "priority": schedule.get("priority", "normal"),
             "type": schedule.get("type", ""),
             "status": status,
             "error": error,
