@@ -5195,6 +5195,7 @@ class WorkflowManagerWindow:
 
         Button(action_row, text="Save", width=14, bg="darkgreen", fg="white", command=self.save_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Run", width=14, bg="#2f5597", fg="white", command=self.run_workflow).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Run Parallel", width=14, bg="#3d6d3d", fg="white", command=self.run_parallel_workflow,).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Validate", width=14, bg="#555577", fg="white", command=self.validate_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Queue", width=14, bg="#2f5597", fg="white", command=self.queue_workflow,).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Visualizer", width=14, bg="#555577", fg="white", command=self.visualize_workflow,).pack(side=LEFT, padx=(0,6))
@@ -5359,6 +5360,24 @@ class WorkflowManagerWindow:
         except Exception as exc:
             self.app.show_traceback_window(
                 "Retry Workflow Failed",
+                exc,
+            )
+
+    def run_parallel_workflow(self):
+        name = self.name_var.get().strip()
+
+        if not name:
+            messagebox.showerror(
+                "Workflow Manager",
+                "Select or enter a workflow name.",
+            )
+            return
+
+        try:
+            self.app.run_workflow_parallel(name)
+        except Exception as exc:
+            self.app.show_traceback_window(
+                "Run Parallel Workflow Failed",
                 exc,
             )
 
@@ -6087,6 +6106,230 @@ class TermForgeApp:
             self.root.quit()
         finally:
             self.root.destroy()
+
+    def workflow_step_can_run(self, step: dict, completed: set, failed: set) -> bool:
+        depends_on = step.get("depends_on", [])
+
+        if isinstance(depends_on, str):
+            depends_on = [depends_on]
+
+        run_if = str(step.get("run_if", "always")).strip().lower() or "always"
+
+        missing = [
+            dep for dep in depends_on
+            if dep not in completed and dep not in failed
+        ]
+
+        if missing:
+            return False
+
+        dep_failed = any(dep in failed for dep in depends_on)
+
+        if run_if == "never":
+            return False
+
+        if run_if == "success" and dep_failed:
+            return False
+
+        if run_if == "failed" and not dep_failed:
+            return False
+
+        return True
+
+    def run_workflow_step(self, workflow_name: str, step: dict) -> tuple[str, bool, str]:
+        step_id = str(step.get("id", "")).strip()
+
+        try:
+            environment = step.get("environment", "")
+            profile = step.get("profile", "")
+            command = step.get("command")
+
+            if environment:
+                self.set_current_environment(str(environment))
+
+            if profile:
+                self.select_window_profile(str(profile))
+
+            if isinstance(command, str):
+                if "/" not in command:
+                    raise TermForgeError(
+                        f"Workflow command string must be Category/Command: {command}"
+                    )
+
+                category, cmd_name = command.split("/", 1)
+                self.select_cmd(None, category, cmd_name)
+
+            elif isinstance(command, (list, tuple)):
+                cmd_type, cmd_text, options = parse_command_entry(command)
+
+                self.run_cmd(
+                    cmd_type,
+                    cmd_text,
+                    options,
+                    None,
+                    record_history=False,
+                )
+
+            else:
+                raise TermForgeError(
+                    f"Invalid workflow command for step {step_id}: {command!r}"
+                )
+
+            return step_id, True, ""
+
+        except Exception as exc:
+            return step_id, False, str(exc)
+
+    def run_workflow_parallel(
+        self,
+        name: str,
+        source: str = "workflow-parallel",
+    ) -> None:
+        workflows = self.get_workflows()
+        steps = workflows.get(name)
+
+        if steps is None:
+            raise TermForgeError(f"Unknown workflow: {name}")
+
+        errors = self.validate_workflow(steps)
+        if errors:
+            raise TermForgeError(
+                "Workflow validation failed:\n" + "\n".join(errors)
+            )
+
+        step_map = {
+            str(step.get("id", "")).strip(): step
+            for step in steps
+            if isinstance(step, dict) and str(step.get("id", "")).strip()
+        }
+
+        completed = set()
+        failed = set()
+        skipped = set()
+
+        total = len(step_map)
+        runner = self.get_chain_runner(total)
+        runner.log("──", f"Dependency workflow started — {name}")
+
+        max_iterations = max(total * 3, 3)
+        iterations = 0
+
+        while len(completed) + len(failed) + len(skipped) < total:
+            iterations += 1
+
+            if iterations > max_iterations:
+                runner.step_failed(
+                    "Workflow stopped: dependency loop safety limit reached."
+                )
+                break
+
+            ready = []
+
+            for step_id, step in step_map.items():
+                if (
+                    step_id in completed
+                    or step_id in failed
+                    or step_id in skipped
+                ):
+                    continue
+
+                depends_on = step.get("depends_on", [])
+
+                if isinstance(depends_on, str):
+                    depends_on = [depends_on]
+
+                missing = [
+                    dep for dep in depends_on
+                    if dep not in completed and dep not in failed
+                ]
+
+                if missing:
+                    continue
+
+                run_if = (
+                    str(step.get("run_if", "always"))
+                    .strip()
+                    .lower()
+                    or "always"
+                )
+
+                dep_failed = any(dep in failed for dep in depends_on)
+
+                if run_if == "never":
+                    skipped.add(step_id)
+                    runner.step_done(f"Skipped by run_if=never: {step_id}")
+                    continue
+
+                if run_if == "success" and dep_failed:
+                    skipped.add(step_id)
+                    runner.step_done(
+                        f"Skipped because dependency failed: {step_id}"
+                    )
+                    continue
+
+                if run_if == "failed" and not dep_failed:
+                    skipped.add(step_id)
+                    runner.step_done(
+                        f"Skipped because no dependency failed: {step_id}"
+                    )
+                    continue
+
+                ready.append((step_id, step))
+
+            if not ready:
+                unresolved = [
+                    step_id
+                    for step_id in step_map
+                    if step_id not in completed
+                    and step_id not in failed
+                    and step_id not in skipped
+                ]
+
+                for step_id in unresolved:
+                    skipped.add(step_id)
+                    runner.step_failed(
+                        f"Skipped unresolved workflow step: {step_id}"
+                    )
+
+                break
+
+            results = []
+
+            for step_id, step in ready:
+                runner.step_running(
+                    len(completed) + len(failed) + len(skipped) + 1,
+                    total,
+                    f"dependency wave step {step_id}",
+                )
+
+                result = self.run_workflow_step(name, step)
+                results.append(result)
+
+            for step_id, ok, error in results:
+                if ok:
+                    completed.add(step_id)
+                    runner.step_done(f"Workflow step complete: {step_id}")
+                else:
+                    failed.add(step_id)
+                    runner.step_failed(
+                        f"Workflow step failed: {step_id}: {error}"
+                    )
+
+        self.add_history_entry(
+            "workflow_dependency",
+            f"{name}: {len(completed)}/{total} completed, "
+            f"{len(failed)} failed, {len(skipped)} skipped",
+            source=source,
+        )
+
+        self.set_status(
+            f"Workflow {name}: "
+            f"{len(completed)}/{total} completed, "
+            f"{len(failed)} failed, "
+            f"{len(skipped)} skipped."
+        )
+
+        runner.finished()
 
     def enqueue_workflow(
         self,
