@@ -1732,19 +1732,32 @@ class CommandEditorWindow:
         initial = []
 
         if current:
-            try:
-                initial = json.loads(current)
-            except Exception as exc:
-                self.app.show_traceback_window(f"Chain Builder, Could not parse current chain JSON:\n\n", (exc))
-                return
+            if current.startswith("["):
+                try:
+                    initial = json.loads(current)
+                except Exception as exc:
+                    self.app.show_traceback_window(
+                        "Chain Builder: Could not parse current chain JSON",
+                        exc,
+                    )
+                    return
+            else:
+                initial = []
 
-        builder = ChainBuilderWindow(self.window, self.app, initial_steps=initial)
+        builder = ChainBuilderWindow(
+            self.window,
+            self.app,
+            initial_steps=initial,
+        )
+
         result = builder.show()
 
         if result is not None:
             self.command_text.delete("1.0", END)
-            self.command_text.insert("1.0", json.dumps(result, indent=2))
-
+            self.command_text.insert(
+                "1.0",
+                json.dumps(result, indent=2),
+            )
 
     def refresh(self):
         self.snapshot.clear()
@@ -4369,7 +4382,7 @@ class ProfileManagerWindow:
         self.app = app
         self.window = Toplevel(app.root)
         self.window.title("Profile / Environment Manager")
-        self.window.geometry("880x520")
+        self.window.geometry("1040x520")
         self.window.transient(app.root)
 
         outer = Frame(self.window, padx=8, pady=8)
@@ -6135,7 +6148,7 @@ class BackendManagerWindow:
         self.app = app
         self.window = Toplevel(app.root)
         self.window.title("Backend Manager")
-        self.window.geometry("840x480")
+        self.window.geometry("920x480")
         self.window.transient(app.root)
 
         outer = Frame(self.window, padx=8, pady=8)
@@ -6183,11 +6196,29 @@ class BackendManagerWindow:
 
         Button(
             action_row,
+            text="Pick Tmux Target",
+            width=18,
+            bg="#555577",
+            fg="white",
+            command=self.pick_tmux_target,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
             text="Attach Tmux",
             width=14,
             bg="#3d6d3d",
             fg="white",
             command=self.attach_tmux,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="View Output",
+            width=14,
+            bg="#2f5597",
+            fg="white",
+            command=self.open_output_viewer,
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
@@ -6328,6 +6359,18 @@ class BackendManagerWindow:
         except Exception as exc:
             self.app.show_traceback_window("Auto-detect Backend Failed", exc)
             return
+
+        self.refresh_info()
+
+    def open_output_viewer(self):
+        TerminalOutputViewerWindow(self.app)
+
+    def pick_tmux_target(self):
+        try:
+            picker = TmuxTargetPickerWindow(self.app, self)
+            picker.window.wait_window()
+        except Exception as exc:
+            self.app.show_traceback_window("Tmux Target Picker Failed", exc)
 
         self.refresh_info()
 
@@ -6515,6 +6558,53 @@ class TmuxBackend:
 
     def get_pane(self) -> str:
         return str(getattr(self.app.cfg, "TmuxPane", "") or "")
+
+    def list_targets(self) -> list[dict]:
+        if shutil.which("tmux") is None:
+            return []
+
+        result = subprocess.run(
+            [
+                "tmux",
+                "list-panes",
+                "-a",
+                "-F",
+                "#{session_name}|#{window_index}|#{window_name}|#{pane_index}|#{pane_id}|#{pane_current_command}|#{pane_active}",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            return []
+
+        targets = []
+
+        for line in result.stdout.splitlines():
+            parts = line.split("|")
+
+            if len(parts) != 7:
+                continue
+
+            session, win_idx, win_name, pane_idx, pane_id, command, active = parts
+
+            target = f"{session}:{win_idx}.{pane_idx}"
+
+            targets.append(
+                {
+                    "session": session,
+                    "window_index": win_idx,
+                    "window_name": win_name,
+                    "pane_index": pane_idx,
+                    "pane_id": pane_id,
+                    "command": command,
+                    "active": active == "1",
+                    "target": target,
+                }
+            )
+
+        return targets
 
     def target(self) -> str:
         pane = self.get_pane().strip()
@@ -6715,8 +6805,420 @@ class TmuxBackend:
 
         self.app.set_status(f"Attached tmux session: {session}")
 
+    def capture_output(self, lines: int = 200) -> str:
+        self.ensure_session()
+
+        target = self.target()
+
+        result = subprocess.run(
+            [
+                "tmux",
+                "capture-pane",
+                "-t",
+                target,
+                "-p",
+                "-S",
+                f"-{int(lines)}",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            raise TermForgeError(
+                "tmux capture-pane failed:\n\n"
+                f"{result.stderr}"
+            )
+
+        return result.stdout
+
     def get_mode(self) -> str:
         return str(getattr(self.app.cfg, "TmuxMode", "pane") or "pane").lower()
+
+class TmuxTargetPickerWindow:
+    def __init__(self, app, manager=None):
+        self.app = app
+        self.manager = manager
+
+        self.window = Toplevel(app.root)
+        self.window.title("Tmux Target Picker")
+        self.window.geometry("980x520")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Tmux Target Picker",
+            bd=4,
+            width=34,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(
+            action_row,
+            text="Use Selected",
+            width=14,
+            bg="darkgreen",
+            fg="white",
+            command=self.use_selected,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Refresh",
+            width=14,
+            bg="navy",
+            fg="white",
+            command=self.refresh,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Close",
+            width=14,
+            bg="red",
+            fg="black",
+            command=self.window.destroy,
+        ).pack(side=RIGHT)
+
+        self.listbox = Listbox(
+            outer,
+            width=140,
+            height=18,
+            exportselection=False,
+        )
+        self.listbox.pack(fill=BOTH, expand=True)
+
+        self.info = Text(outer, wrap="word", height=8)
+        self.info.pack(fill=BOTH, expand=True, pady=(8, 0))
+
+        self.snapshot = []
+        self.listbox.bind("<<ListboxSelect>>", self.on_select)
+
+        self.refresh()
+
+    def refresh(self):
+        backend = TmuxBackend(self.app)
+        self.snapshot = backend.list_targets()
+
+        self.listbox.delete(0, END)
+        self.info.delete("1.0", END)
+
+        if not self.snapshot:
+            self.info.insert(
+                "1.0",
+                "No tmux targets found.\n\n"
+                "Create one with:\n"
+                "tmux new-session -d -s termforge bash",
+            )
+            return
+
+        for item in self.snapshot:
+            active = "*" if item.get("active") else " "
+            self.listbox.insert(
+                END,
+                f'{active} {item.get("target")} '
+                f'[{item.get("pane_id")}] '
+                f'window="{item.get("window_name")}" '
+                f'cmd={item.get("command")}',
+            )
+
+    def selected_item(self):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return None
+
+        index = idxs[0]
+
+        if index < 0 or index >= len(self.snapshot):
+            return None
+
+        return self.snapshot[index]
+
+    def on_select(self, _event=None):
+        item = self.selected_item()
+
+        if not item:
+            return
+
+        self.info.delete("1.0", END)
+        self.info.insert("1.0", pprint.pformat(item, indent=4))
+
+    def use_selected(self):
+        item = self.selected_item()
+
+        if not item:
+            messagebox.showerror(
+                "Tmux Target Picker",
+                "Select a tmux target first.",
+            )
+            return
+
+        session = item.get("session", "")
+        target = item.get("target", "")
+
+        setattr(self.app.cfg, "TmuxSession", session)
+        setattr(self.app.cfg, "TmuxPane", target)
+
+        self.app.persist_full_config()
+
+        if self.manager is not None:
+            if hasattr(self.manager, "tmux_session_var"):
+                self.manager.tmux_session_var.set(session)
+
+            if hasattr(self.manager, "tmux_pane_var"):
+                self.manager.tmux_pane_var.set(target)
+
+        self.app.set_status(f"Selected tmux target: {target}")
+        self.window.destroy()
+
+class TerminalOutputViewerWindow:
+    def __init__(self, app):
+        self.app = app
+
+        self.window = Toplevel(app.root)
+        self.window.title("Terminal Output Viewer")
+        self.window.geometry("1100x720")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Terminal Output Viewer",
+            bd=4,
+            width=38,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        controls = Frame(outer)
+        controls.pack(fill=X, pady=(0, 8))
+
+        Label(controls, text="Source:", width=8, anchor="w").pack(side=LEFT)
+
+        self.source_var = StringVar(value="tmux")
+        self.source_menu = OptionMenu(
+            controls,
+            self.source_var,
+            "tmux",
+            "file",
+        )
+        self.source_menu.config(width=12)
+        self.source_menu.pack(side=LEFT, padx=(0, 8))
+
+        Label(controls, text="Lines:", width=6, anchor="w").pack(side=LEFT)
+
+        self.lines_var = StringVar(value="200")
+        Entry(
+            controls,
+            textvariable=self.lines_var,
+            width=8,
+        ).pack(side=LEFT, padx=(0, 8))
+
+        Label(controls, text="File:", width=5, anchor="w").pack(side=LEFT)
+
+        self.file_var = StringVar()
+        Entry(
+            controls,
+            textvariable=self.file_var,
+            width=48,
+        ).pack(side=LEFT, fill=X, expand=True, padx=(0, 8))
+
+        Button(
+            controls,
+            text="Browse",
+            width=10,
+            bg="#555577",
+            fg="white",
+            command=self.browse_file,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            controls,
+            text="Refresh",
+            width=12,
+            bg="navy",
+            fg="white",
+            command=self.refresh,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            controls,
+            text="Copy",
+            width=10,
+            bg="#2f5597",
+            fg="white",
+            command=self.copy_output,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            controls,
+            text="Save As",
+            width=10,
+            bg="darkgreen",
+            fg="white",
+            command=self.save_as,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            controls,
+            text="Close",
+            width=10,
+            bg="red",
+            fg="black",
+            command=self.window.destroy,
+        ).pack(side=RIGHT)
+
+        self.info = Label(
+            outer,
+            text="",
+            anchor="w",
+            justify=LEFT,
+        )
+        self.info.pack(fill=X, pady=(0, 4))
+
+        text_frame = Frame(outer)
+        text_frame.pack(fill=BOTH, expand=True)
+
+        self.output = Text(
+            text_frame,
+            wrap="none",
+            width=130,
+            height=34,
+        )
+        self.output.pack(side=LEFT, fill=BOTH, expand=True)
+
+        yscroll = Scrollbar(text_frame, command=self.output.yview)
+        yscroll.pack(side=RIGHT, fill=Y)
+        self.output.config(yscrollcommand=yscroll.set)
+
+        self.refresh()
+
+    def get_lines(self) -> int:
+        try:
+            value = int(self.lines_var.get().strip())
+            return max(value, 1)
+        except Exception:
+            return 200
+
+    def browse_file(self):
+        path = filedialog.askopenfilename(
+            title="Open output/log file",
+            filetypes=[
+                ("Text files", "*.txt *.log *.out *.err"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if path:
+            self.file_var.set(path)
+            self.source_var.set("file")
+            self.refresh()
+
+    def load_tmux_output(self) -> str:
+        backend = self.app.backend
+
+        if not isinstance(backend, TmuxBackend):
+            backend = TmuxBackend(self.app)
+
+        return backend.capture_output(
+            lines=self.get_lines(),
+        )
+
+    def load_file_output(self) -> str:
+        path = self.file_var.get().strip()
+
+        if not path:
+            raise TermForgeError("Select a file first.")
+
+        p = Path(path).expanduser()
+
+        if not p.exists():
+            raise TermForgeError(f"File does not exist: {p}")
+
+        lines = self.get_lines()
+
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except TypeError:
+            text = p.read_text(encoding="utf-8")
+
+        split = text.splitlines()
+        return "\n".join(split[-lines:])
+
+    def refresh(self):
+        source = self.source_var.get().strip()
+
+        try:
+            if source == "file":
+                text = self.load_file_output()
+                label = f"File output: {self.file_var.get().strip()}"
+            else:
+                text = self.load_tmux_output()
+                label = (
+                    "tmux output: "
+                    f"session={getattr(self.app.cfg, 'TmuxSession', 'termforge')} "
+                    f"target={getattr(self.app.cfg, 'TmuxPane', '') or '(session default)'}"
+                )
+
+        except Exception as exc:
+            text = ""
+            label = f"Error: {exc}"
+
+        self.info.config(text=label)
+
+        self.output.delete("1.0", END)
+        self.output.insert("1.0", text)
+
+    def copy_output(self):
+        text = self.output.get("1.0", END).strip()
+
+        self.window.clipboard_clear()
+        self.window.clipboard_append(text)
+        self.window.update()
+
+        messagebox.showinfo(
+            "Terminal Output Viewer",
+            "Output copied to clipboard.",
+        )
+
+    def save_as(self):
+        text = self.output.get("1.0", END)
+
+        target = filedialog.asksaveasfilename(
+            title="Save Terminal Output",
+            defaultextension=".txt",
+            initialfile="termforge_terminal_output.txt",
+            filetypes=[
+                ("Text files", "*.txt"),
+                ("Log files", "*.log"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if not target:
+            return
+
+        Path(target).write_text(
+            text,
+            encoding="utf-8",
+        )
+
+        messagebox.showinfo(
+            "Terminal Output Viewer",
+            f"Saved output to:\n\n{target}",
+        )
 
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
@@ -6970,6 +7472,8 @@ class TermForgeApp:
 
         return "unknown"
 
+    def open_terminal_output_viewer(self):
+        TerminalOutputViewerWindow(self)
 
     def backend_health_report(self) -> dict:
         session = self.detect_session_type()
@@ -10095,6 +10599,8 @@ class TermForgeApp:
         tools_menu.add_command(label="Category Editor", command=self.open_category_editor)
         tools_menu.add_command(label="Tag Manager", command=self.open_tag_manager)
         tools_menu.add_command(label="Plugin Manager", command=self.open_plugin_manager)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Terminal Output Viewer", command=self.open_terminal_output_viewer,)
         tools_menu.add_separator()
         tools_menu.add_command(label="Hotkeys", command=self.show_hotkeys_help)
         tools_menu.add_command(label="Hotkey Editor", command=self.open_hotkey_editor)
