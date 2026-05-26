@@ -4,6 +4,7 @@ import json
 import logging
 import pprint
 import re
+import os
 import subprocess
 import sys
 import time
@@ -12,6 +13,7 @@ import traceback
 import shutil
 import html
 import webbrowser
+import shlex
 from datetime import datetime
 
 try:
@@ -100,6 +102,11 @@ def ensure_user_config() -> None:
     if CONFIG_FILE.exists():
         return
     from . import default_config
+
+    "TmuxMode = 'pane'",
+    "TmuxSession = 'termforge'",
+    "TmuxPane = ''",
+
     lines = [
         "# TermForge user configuration",
         "# Edit Categories below.",
@@ -124,6 +131,8 @@ def ensure_user_config() -> None:
         "EnvironmentTemplates = {}",
         "Workflows = {}",
         "Backend = x11",
+        f"TmuxSession = {repr(tmux_session)}",
+        f"TmuxPane = {repr(tmux_pane)}",
         "",
     ]
     backup_dir = Path(getattr(cfg, "BackupDir", CONFIG_DIR / "backups"))
@@ -440,6 +449,13 @@ class HotkeyEditorWindow:
         idxs = self.listbox.curselection()
         if not idxs:
             return
+        index = idxs[0]
+
+        if index < 0 or index >= len(self.snapshot):
+            return
+
+        row = self.snapshot[index]
+
         hotkey, category, command = self.snapshot[idxs[0]]
         self.hotkey_var.set(hotkey)
         self.category_var.set(category)
@@ -4407,6 +4423,43 @@ class ProfileManagerWindow:
         self.window_id_var = StringVar()
         Entry(form, textvariable=self.window_id_var, width=42).grid(row=1, column=1, sticky="ew", pady=3)
 
+        Label(form, text="Backend:", width=16, anchor="w").grid(row=2, column=0, sticky="w", pady=3)
+        self.backend_var = StringVar(value=self.app.get_backend_name())
+        self.backend_menu = OptionMenu(
+            form,
+            self.backend_var,
+            "x11",
+            "subprocess",
+            "tmux",
+        )
+        self.backend_menu.config(width=38)
+        self.backend_menu.grid(row=2, column=1, sticky="w", pady=3)
+
+        Label(form, text="Tmux Session:", width=16, anchor="w").grid(row=3, column=0, sticky="w", pady=3)
+        self.tmux_session_var = StringVar(
+            value=str(getattr(self.app.cfg, "TmuxSession", "termforge"))
+        )
+        Entry(form, textvariable=self.tmux_session_var, width=42).grid(row=3, column=1, sticky="ew", pady=3)
+
+        Label(form, text="Tmux Pane:", width=16, anchor="w").grid(row=4, column=0, sticky="w", pady=3)
+        self.tmux_pane_var = StringVar(
+            value=str(getattr(self.app.cfg, "TmuxPane", ""))
+        )
+        Entry(form, textvariable=self.tmux_pane_var, width=42).grid(row=4, column=1, sticky="ew", pady=3)
+
+        Label(form, text="Tmux Mode:", width=16, anchor="w").grid(row=5, column=0, sticky="w", pady=3)
+        self.tmux_mode_var = StringVar(
+            value=str(getattr(self.app.cfg, "TmuxMode", "pane"))
+        )
+        self.tmux_mode_menu = OptionMenu(
+            form,
+            self.tmux_mode_var,
+            "pane",
+            "job",
+        )
+        self.tmux_mode_menu.config(width=38)
+        self.tmux_mode_menu.grid(row=5, column=1, sticky="w", pady=3)
+
         form.columnconfigure(1, weight=1)
 
         self.info = Text(right, wrap="word", height=16)
@@ -4439,9 +4492,13 @@ class ProfileManagerWindow:
             status = validation.get("status", "unknown").upper()
 
             self.snapshot.append((name, profile, validation))
+
+            backend = profile.get("backend", "")
+
             self.listbox.insert(
                 END,
                 f"[{status}] {name} -> {window_id}",
+                f"{f'backend:{backend}' if backend else ''}",
             )
 
         self.info.delete("1.0", END)
@@ -4473,14 +4530,25 @@ class ProfileManagerWindow:
         idxs = self.listbox.curselection()
         if not idxs:
             return None
-        return self.snapshot[idxs[0]][0]
+
+        index = idxs[0]
+
+        if index < 0 or index >= len(self.snapshot):
+            return None
+
+        return self.snapshot[index][0]
 
     def on_select(self, _event=None):
         idxs = self.listbox.curselection()
         if not idxs:
             return
 
-        row = self.snapshot[idxs[0]]
+        index = idxs[0]
+
+        if index < 0 or index >= len(self.snapshot):
+            return
+
+        row = self.snapshot[index]
 
         if len(row) == 3:
             name, profile, validation = row
@@ -4490,6 +4558,24 @@ class ProfileManagerWindow:
 
         self.name_var.set(name)
         self.window_id_var.set(str(profile.get("window_id", "")))
+
+        if hasattr(self, "backend_var"):
+            self.backend_var.set(profile.get("backend", self.app.get_backend_name()))
+
+        if hasattr(self, "tmux_session_var"):
+            self.tmux_session_var.set(
+                str(profile.get("tmux_session", getattr(self.app.cfg, "TmuxSession", "termforge")))
+            )
+
+        if hasattr(self, "tmux_pane_var"):
+            self.tmux_pane_var.set(
+                str(profile.get("tmux_pane", getattr(self.app.cfg, "TmuxPane", "")))
+            )
+
+        if hasattr(self, "tmux_mode_var"):
+            self.tmux_mode_var.set(
+                str(profile.get("tmux_mode", getattr(self.app.cfg, "TmuxMode", "pane")))
+            )
 
         self.info.delete("1.0", END)
         self.info.insert(
@@ -4511,6 +4597,11 @@ class ProfileManagerWindow:
             return
 
         try:
+            setattr(self.app.cfg, "Backend", self.backend_var.get().strip() or self.app.get_backend_name())
+            setattr(self.app.cfg, "TmuxSession", self.tmux_session_var.get().strip() or "termforge")
+            setattr(self.app.cfg, "TmuxPane", self.tmux_pane_var.get().strip())
+            setattr(self.app.cfg, "TmuxMode", self.tmux_mode_var.get().strip() or "pane")
+            self.app.backend = self.app.create_backend()
             self.app.save_current_window_as_profile(name)
         except Exception as exc:
             self.app.show_traceback_window("Save Profile Failed", exc)
@@ -5898,10 +5989,28 @@ class X11Backend:
         return self.app.select_target_window()
 
     def send_text(self, text: str, record_history: bool = True):
-        return self.app.send_to_selected_window(
-            text,
-            record_history=record_history,
+        self.ensure_session()
+
+        target = self.target()
+
+        subprocess.run(
+            ["tmux", "send-keys", "-t", target, "-l", text],
+            check=True,
         )
+
+        subprocess.run(
+            ["tmux", "send-keys", "-t", target, "Enter"],
+            check=True,
+        )
+
+        self.app.set_status(f"Sent command to tmux: {target}")
+
+        if record_history:
+            self.app.add_history_entry(
+                "tmux",
+                text,
+                source="backend",
+            )
 
     def run_detached(self, command: str, record_history: bool = True):
         return self.app.run_detached(
@@ -6047,6 +6156,15 @@ class BackendManagerWindow:
 
         Button(
             action_row,
+            text="Auto-detect",
+            width=14,
+            bg="#555577",
+            fg="white",
+            command=self.auto_detect_backend,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
             text="Apply Backend",
             width=16,
             bg="darkgreen",
@@ -6061,6 +6179,15 @@ class BackendManagerWindow:
             bg="#2f5597",
             fg="white",
             command=self.test_backend,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Attach Tmux",
+            width=14,
+            bg="#3d6d3d",
+            fg="white",
+            command=self.attach_tmux,
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
@@ -6089,7 +6216,46 @@ class BackendManagerWindow:
             self.backend_var,
             "x11",
             "subprocess",
+            "tmux",
         )
+
+        tmux_frame = Frame(body)
+        tmux_frame.pack(fill=X, pady=(8, 8))
+
+        Label(
+            tmux_frame,
+            text="Tmux Session:",
+            width=14,
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w", pady=3)
+
+        self.tmux_session_var = StringVar(
+            value=str(getattr(app.cfg, "TmuxSession", "termforge"))
+        )
+
+        Entry(
+            tmux_frame,
+            textvariable=self.tmux_session_var,
+            width=32,
+        ).grid(row=0, column=1, sticky="w", pady=3)
+
+        Label(
+            tmux_frame,
+            text="Tmux Pane:",
+            width=14,
+            anchor="w",
+        ).grid(row=1, column=0, sticky="w", pady=3)
+
+        self.tmux_pane_var = StringVar(
+            value=str(getattr(app.cfg, "TmuxPane", ""))
+        )
+
+        Entry(
+            tmux_frame,
+            textvariable=self.tmux_pane_var,
+            width=32,
+        ).grid(row=1, column=1, sticky="w", pady=3)
+
         self.backend_menu.config(width=32)
         self.backend_menu.pack(anchor="w", pady=(0, 8))
 
@@ -6099,53 +6265,132 @@ class BackendManagerWindow:
         self.refresh_info()
 
     def refresh_info(self):
-        current = self.app.get_backend_name()
+        report = self.app.backend_health_report()
 
         x11 = X11Backend(self.app)
         subprocess_backend = SubprocessBackend(self.app)
+        tmux_backend = TmuxBackend(self.app)
+
+        warning = report.get("warning", "")
 
         lines = [
-            f"Current backend: {current}",
+            "Backend Health Check",
             "",
+            f"Session type: {report.get('session')}",
+            f"Current backend: {report.get('current_backend')}",
+            f"Recommended backend: {report.get('recommended_backend')}",
+            "",
+            "Environment:",
+            f"  DISPLAY: {report.get('DISPLAY') or '(empty)'}",
+            f"  WAYLAND_DISPLAY: {report.get('WAYLAND_DISPLAY') or '(empty)'}",
+            "",
+            "Availability:",
+            f"  xdotool: {report.get('xdotool_available')}",
+            f"  subprocess: True",
+            "",
+        ]
+
+        if warning:
+            lines.extend([
+                "Warning:",
+                f"  {warning}",
+                "",
+            ])
+
+        lines.extend([
             "Available backends:",
             "",
-            f"x11:",
+            "x11:",
             f"  Label: {x11.label}",
             f"  Available: {x11.is_available()}",
             f"  Description: {x11.description}",
             "",
-            f"subprocess:",
+            "subprocess:",
             f"  Label: {subprocess_backend.label}",
             f"  Available: {subprocess_backend.is_available()}",
             f"  Description: {subprocess_backend.description}",
             "",
-            "Notes:",
-            "- x11 preserves the classic TermForge selected-window behavior.",
-            "- subprocess is cross-desktop and Wayland-friendly.",
-            "- subprocess runs commands directly instead of typing into a terminal.",
-        ]
+            "tmux:",
+            f"  Label: {tmux_backend.label}",
+            f"  Available: {tmux_backend.is_available()}",
+            f"  Description: {tmux_backend.description}",
+            f"  Session: {getattr(self.app.cfg, 'TmuxSession', 'termforge')}",
+            f"  Pane: {getattr(self.app.cfg, 'TmuxPane', '') or '(session default)'}",
+        ])
 
         self.info.delete("1.0", END)
         self.info.insert("1.0", "\n".join(lines))
 
-    def apply_backend(self):
-        name = self.backend_var.get().strip()
-
+    def auto_detect_backend(self):
         try:
-            self.app.set_backend_name(name)
+            self.app.auto_select_backend()
+            self.backend_var.set(self.app.get_backend_name())
         except Exception as exc:
-            self.app.show_traceback_window("Apply Backend Failed", exc)
+            self.app.show_traceback_window("Auto-detect Backend Failed", exc)
             return
 
         self.refresh_info()
 
-    def test_backend(self):
-        name = self.backend_var.get().strip()
+    def apply_backend(self):
+        name = self.backend_var.get().strip().lower()
 
         try:
-            self.app.set_backend_name(name)
+            setattr(
+                self.app.cfg,
+                "TmuxSession",
+                self.tmux_session_var.get().strip() or "termforge",
+            )
+            setattr(
+                self.app.cfg,
+                "TmuxPane",
+                self.tmux_pane_var.get().strip(),
+            )
 
+            self.app.set_backend_name(name)
+            if name == "tmux":
+                self.app.backend.attach_to_selected_window()
+
+            selected = self.app.get_selected_window_id()
+
+            if selected:
+                self.app.set_status(
+                    f"Backend selected: {name}; using existing selected window {selected}"
+                )
+            else:
+                self.app.backend.select_target()
+
+        except Exception as exc:
+            self.app.show_traceback_window("Apply Backend Failed", exc)
+            return
+
+        self.refresh_info() 
+
+    def attach_tmux(self):
+        try:
+            setattr(
+                self.app.cfg,
+                "TmuxSession",
+                self.tmux_session_var.get().strip() or "termforge",
+            )
+
+            if self.app.get_backend_name() != "tmux":
+                self.app.set_backend_name("tmux")
+
+            if not hasattr(self.app.backend, "attach"):
+                raise TermForgeError("Current backend does not support attach.")
+
+            self.app.backend.attach()
+
+        except Exception as exc:
+            self.app.show_traceback_window("Attach Tmux Failed", exc)
+
+    def test_backend(self):
+        name = self.backend_var.get().strip().lower()
+
+        try:
             if name == "subprocess":
+                self.app.set_backend_name("subprocess")
+
                 self.app.backend.run_detached(
                     "echo TERMFORGE_BACKEND_TEST >> /tmp/termforge-backend-test.log",
                     record_history=True,
@@ -6156,8 +6401,44 @@ class BackendManagerWindow:
                     "Subprocess backend test launched.\n\n"
                     "Check:\n/tmp/termforge-backend-test.log",
                 )
+                return
 
-            else:
+            elif name == "tmux":
+                if shutil.which("tmux") is None:
+                    messagebox.showerror(
+                        "Backend Test",
+                        "tmux is not installed.\n\nInstall it with:\n\nsudo apt install tmux",
+                    )
+                    return
+
+                setattr(
+                    self.app.cfg,
+                    "TmuxSession",
+                    self.tmux_session_var.get().strip() or "termforge",
+                )
+                setattr(
+                    self.app.cfg,
+                    "TmuxPane",
+                    self.tmux_pane_var.get().strip(),
+                )
+
+                self.app.set_backend_name("tmux")
+
+                self.app.backend.send_text(
+                    "echo TERMFORGE_TMUX_BACKEND_TEST",
+                    record_history=True,
+                )
+
+                messagebox.showinfo(
+                    "Backend Test",
+                    "Tmux backend test sent.\n\n"
+                    "Attach with:\n"
+                    f"tmux attach -t {self.tmux_session_var.get().strip() or 'termforge'}",
+                )
+                return
+
+            elif name == "x11":
+                self.app.set_backend_name("x11")
                 self.app.backend.select_target()
 
                 messagebox.showinfo(
@@ -6165,12 +6446,277 @@ class BackendManagerWindow:
                     "X11 backend selected.\n\n"
                     "Try sending a command to the selected window.",
                 )
+                return
+
+            else:
+                messagebox.showerror(
+                    "Backend Test",
+                    f"Unknown backend: {name}",
+                )
+                return
 
         except Exception as exc:
             self.app.show_traceback_window("Backend Test Failed", exc)
 
         self.refresh_info()
 
+    def send_text(self, text: str, record_history: bool = True):
+        self.run_detached(text, record_history=record_history)
+
+#     def send_text(self, text: str, record_history: bool = True):
+#         self.ensure_session()
+# 
+#         target = self.target()
+# 
+#         subprocess.run(
+#             ["tmux", "set-buffer", "-b", "termforge_cmd", text],
+#             check=True,
+#         )
+# 
+#         subprocess.run(
+#             ["tmux", "paste-buffer", "-b", "termforge_cmd", "-t", target],
+#             check=True,
+#         )
+# 
+#         subprocess.run(
+#             ["tmux", "send-keys", "-t", target, "C-m"],
+#             check=True,
+#         )
+# 
+#         self.app.set_status(f"Sent command to tmux: {target}")
+# 
+#         if record_history:
+#             self.app.add_history_entry(
+#                 "tmux",
+#                 text,
+#                 source="backend",
+#             )
+
+class TmuxBackend:
+    name = "tmux"
+    label = "tmux / Terminal Session"
+    description = (
+        "Sends commands to a tmux session/pane. "
+        "Works on X11, Wayland, SSH, and headless systems. "
+        "Best backend for terminal automation."
+    )
+
+    def __init__(self, app):
+        self.app = app
+
+    def get_mode(self) -> str:
+        return str(getattr(self.app.cfg, "TmuxMode", "pane") or "pane").lower()
+
+    def is_available(self) -> bool:
+        return shutil.which("tmux") is not None
+
+    def get_session(self) -> str:
+        return str(getattr(self.app.cfg, "TmuxSession", "termforge") or "termforge")
+
+    def get_pane(self) -> str:
+        return str(getattr(self.app.cfg, "TmuxPane", "") or "")
+
+    def target(self) -> str:
+        pane = self.get_pane().strip()
+        if pane:
+            return pane
+        return self.get_session()
+
+    def ensure_session(self) -> None:
+        if shutil.which("tmux") is None:
+            raise TermForgeError(
+                "tmux is not installed. Install it with:\n\n"
+                "sudo apt install tmux"
+            )
+
+        session = self.get_session()
+
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", session],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            subprocess.run(
+                ["tmux", "new-session", "-d", "-s", session],
+                check=True,
+            )
+
+    def attach_to_selected_window(self):
+        self.ensure_session()
+
+        window_id = self.app.get_selected_window_id()
+
+        if not window_id:
+            raise TermForgeError(
+                "No terminal window selected for tmux attach."
+            )
+
+        command = f"tmux attach -t {shlex.quote(self.get_session())}"
+
+        # Reuse TermForge's existing X11 send path.
+        self.app.send_to_selected_window(
+            command,
+            record_history=False,
+        )
+
+        self.app.set_status(
+            f"Attached tmux session in selected window: {window_id}"
+        )
+
+    def select_target(self):
+        self.ensure_session()
+
+        session = self.get_session()
+
+        result = subprocess.run(
+            [
+                "tmux",
+                "display-message",
+                "-p",
+                "-t",
+                session,
+                "#{session_name}:#{window_index}.#{pane_index}",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            raise TermForgeError(
+                "Could not detect tmux target:\n\n"
+                f"{result.stderr}"
+            )
+
+        target = result.stdout.strip()
+
+        setattr(self.app.cfg, "TmuxPane", target)
+
+        self.app.persist_full_config()
+
+        self.app.set_status(
+            f"Selected tmux target: {target}"
+        )
+
+    def send_text(self, text: str, record_history: bool = True):
+        self.ensure_session()
+
+        target = self.target()
+
+        subprocess.run(
+            ["tmux", "send-keys", "-t", target, text],
+            check=True,
+        )
+
+        subprocess.run(
+            ["tmux", "send-keys", "-t", target, "C-m"],
+            check=True,
+        )
+
+        self.app.set_status(f"Sent command to tmux pane: {target}")
+
+        if record_history:
+            self.app.add_history_entry(
+                "tmux",
+                text,
+                source="backend",
+            )
+
+    def run_job_window(self, command: str, record_history: bool = True):
+        self.ensure_session()
+
+        session = self.get_session()
+
+        result = subprocess.run(
+            [
+                "tmux",
+                "new-window",
+                "-t",
+                f"{session}:",
+                "-n",
+                "termforge-job",
+                "bash",
+                "-lc",
+                f"{command}; echo; echo '[TermForge job complete]'; exec bash",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            raise TermForgeError(
+                "tmux new-window failed:\n\n"
+                f"stdout:\n{result.stdout}\n\n"
+                f"stderr:\n{result.stderr}"
+            )
+
+        self.app.set_status(f"Started tmux job in session: {session}")
+
+        if record_history:
+            self.app.add_history_entry(
+                "tmux",
+                command,
+                source="backend",
+            )
+
+    def run_detached(self, command: str, record_history: bool = True):
+        mode = self.get_mode()
+
+        if mode == "job":
+            return self.run_job_window(
+                command,
+                record_history=record_history,
+            )
+
+        return self.send_text(
+            command,
+            record_history=record_history,
+        )
+
+    def attach(self):
+        self.ensure_session()
+
+        session = self.get_session()
+
+        terminal = getattr(self.app.cfg, "terminal", {}).get(
+            "application",
+            "gnome-terminal",
+        )
+
+# tilix
+
+#         subprocess.Popen(
+#             [
+#                 "tilix",
+#                 "-e",
+#                 "tmux",
+#                 "attach",
+#                 "-t",
+#                 session,
+#             ]
+#         )
+
+# normal terminal
+
+#         subprocess.Popen(
+#             [
+#                 terminal,
+#                 "--",
+#                 "tmux",
+#                 "attach",
+#                 "-t",
+#                 session,
+#             ]
+#         )
+
+        self.app.set_status(f"Attached tmux session: {session}")
+
+    def get_mode(self) -> str:
+        return str(getattr(self.app.cfg, "TmuxMode", "pane") or "pane").lower()
 
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
@@ -6206,6 +6752,13 @@ class TermForgeApp:
         self.current_environment = None
 
         self.backend = self.create_backend()
+
+        try:
+            report = self.backend_health_report()
+            if report.get("warning") and self.get_backend_name() != report.get("recommended_backend"):
+                self.log(f"Backend warning: {report.get('warning')}")
+        except Exception:
+            pass
 
         if self.debug:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -6362,7 +6915,17 @@ class TermForgeApp:
         if not STATE_FILE.exists():
             return
         try:
-            data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            raw = STATE_FILE.read_text(encoding="utf-8").strip()
+
+            if not raw:
+                return {}
+
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                bad = STATE_FILE.with_suffix(".bad.json")
+                STATE_FILE.replace(bad)
+                return {}
             self.last_window_id = data.get("last_window_id")
             history = data.get("command_history", [])
             if isinstance(history, list):
@@ -6393,28 +6956,104 @@ class TermForgeApp:
         finally:
             self.root.destroy()
 
+    def detect_session_type(self) -> str:
+        session = os.environ.get("XDG_SESSION_TYPE", "").strip().lower()
+
+        if session:
+            return session
+
+        if os.environ.get("WAYLAND_DISPLAY"):
+            return "wayland"
+
+        if os.environ.get("DISPLAY"):
+            return "x11"
+
+        return "unknown"
+
+
+    def backend_health_report(self) -> dict:
+        session = self.detect_session_type()
+        current = self.get_backend_name()
+
+        xdotool_available = shutil.which("xdotool") is not None
+        display = os.environ.get("DISPLAY", "")
+        wayland_display = os.environ.get("WAYLAND_DISPLAY", "")
+        tmux_available = shutil.which("tmux") is not None
+
+        if session == "wayland":
+            recommended = "tmux" if tmux_available else "subprocess"
+            warning = (
+                "Wayland detected. X11 backend may only work with XWayland windows. "
+                "Subprocess backend is recommended for cross-desktop compatibility."
+            )
+        elif session == "x11":
+            recommended = "x11" if xdotool_available else ("tmux" if tmux_available else "subprocess")
+            warning = "" if xdotool_available else "xdotool not found; subprocess is recommended."
+        else:
+            recommended = "tmux" if tmux_available else "subprocess"
+            warning = "Could not detect graphical session; subprocess is safest."
+
+        return {
+            "session": session,
+            "current_backend": current,
+            "recommended_backend": recommended,
+            "xdotool_available": xdotool_available,
+            "DISPLAY": display,
+            "WAYLAND_DISPLAY": wayland_display,
+            "warning": warning,
+            "tmux_available": tmux_available,
+        }
+
+
+    def auto_select_backend(self) -> None:
+        report = self.backend_health_report()
+        recommended = report.get("recommended_backend", "subprocess")
+
+        self.set_backend_name(recommended)
+
     def get_backend_name(self) -> str:
         return str(getattr(self.cfg, "Backend", "x11") or "x11")
+
+
+        if name not in ("x11", "subprocess", "tmux"):
+            name = str(name).strip().lower()
+
+            if name not in ("x11", "subprocess"):
+                raise TermForgeError(f"Unknown backend: {name}")
+
+            setattr(self.cfg, "Backend", name)
+            self.backend = self.create_backend()
+            self.persist_full_config()
+
+            self.set_status(f"Backend selected: {name}")
 
 
     def set_backend_name(self, name: str) -> None:
         name = str(name).strip().lower()
 
-        if name not in ("x11", "subprocess"):
+        if name not in ("x11", "subprocess", "tmux"):
             raise TermForgeError(f"Unknown backend: {name}")
 
         setattr(self.cfg, "Backend", name)
+
+        selected = self.get_selected_window_id()
+
+        if selected:
+            setattr(self.backend, "selected_window_id", selected)
+
         self.backend = self.create_backend()
+
         self.persist_full_config()
-
         self.set_status(f"Backend selected: {name}")
-
 
     def create_backend(self):
         name = self.get_backend_name()
 
         if name == "subprocess":
             return SubprocessBackend(self)
+
+        if name == "tmux":
+            return TmuxBackend(self)
 
         return X11Backend(self)
 
@@ -7390,6 +8029,7 @@ class TermForgeApp:
             "target_window",
             "current_window",
             "window_id",
+            "win_id",
         ):
             value = getattr(self, attr, None)
             if value:
@@ -7410,6 +8050,10 @@ class TermForgeApp:
         profiles = self.get_window_profiles()
         profiles[profile_name] = {
             "window_id": window_id,
+            "backend": self.get_backend_name(),
+            "tmux_session": getattr(self.cfg, "TmuxSession", "termforge"),
+            "tmux_pane": getattr(self.cfg, "TmuxPane", ""),
+            "tmux_mode": getattr(self.cfg, "TmuxMode", "pane"),
             "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
@@ -7425,6 +8069,9 @@ class TermForgeApp:
             window_id = profile.get("window_id")
         else:
             window_id = profile
+            profile = {
+                "window_id": window_id,
+            }
 
         if not profile:
             raise TermForgeError(f"Unknown profile: {profile_name}")
@@ -7433,13 +8080,51 @@ class TermForgeApp:
         if not window_id:
             raise TermForgeError(f"Profile has no window_id: {profile_name}")
 
+        backend_name = profile.get("backend", "")
+
+        if backend_name:
+            if backend_name in ("x11", "subprocess", "tmux"):
+                setattr(self.cfg, "Backend", backend_name)
+
+                if backend_name == "tmux":
+                    setattr(
+                        self.cfg,
+                        "TmuxSession",
+                        profile.get(
+                            "tmux_session",
+                            getattr(self.cfg, "TmuxSession", "termforge"),
+                        ),
+                    )
+                    setattr(
+                        self.cfg,
+                        "TmuxPane",
+                        profile.get(
+                            "tmux_pane",
+                            getattr(self.cfg, "TmuxPane", ""),
+                        ),
+                    )
+                    setattr(
+                        self.cfg,
+                        "TmuxMode",
+                        profile.get(
+                            "tmux_mode",
+                            getattr(self.cfg, "TmuxMode", "pane"),
+                        ),
+                    )
+
+                self.backend = self.create_backend()
+                self.persist_full_config()
+
         if hasattr(self, "selected_window"):
             self.selected_window = window_id
 
         if hasattr(self, "selected_window_id"):
             self.selected_window_id = window_id
 
-        self.set_status(f"Selected profile: {profile_name} -> {window_id}")
+        self.set_status(
+            f"Selected profile: {profile_name} -> {window_id} "
+            f"backend:{self.get_backend_name()}"
+        )
 
     def open_profiles(self) -> dict:
         ProfileManagerWindow(self)
@@ -9259,6 +9944,9 @@ class TermForgeApp:
             environment_templates = getattr(self.cfg, "EnvironmentTemplates", {},)
             workflows = getattr(self.cfg, "Workflows", {})
             backend = getattr(self.cfg, "Backend", "x11")
+            tmux_session = getattr(self.cfg, "TmuxSession", "termforge")
+            tmux_pane = getattr(self.cfg, "TmuxPane", "")
+            tmux_mode = getattr(self.cfg, "TmuxMode", "pane")
 
             lines = [
                 "# TermForge user configuration",
@@ -9283,6 +9971,7 @@ class TermForgeApp:
                 f"EnvironmentTemplates = {pprint.pformat(environment_templates, indent=4)}",
                 f"Workflows = {pprint.pformat(workflows, indent=4)}",
                 f"Backend = {repr(backend)}",
+                f"TmuxMode = {repr(tmux_mode)}",
                 "",
             ]
             CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
