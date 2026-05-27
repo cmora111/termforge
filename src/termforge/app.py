@@ -4382,7 +4382,7 @@ class ProfileManagerWindow:
         self.app = app
         self.window = Toplevel(app.root)
         self.window.title("Profile / Environment Manager")
-        self.window.geometry("1040x520")
+        self.window.geometry("880x520")
         self.window.transient(app.root)
 
         outer = Frame(self.window, padx=8, pady=8)
@@ -6148,7 +6148,7 @@ class BackendManagerWindow:
         self.app = app
         self.window = Toplevel(app.root)
         self.window.title("Backend Manager")
-        self.window.geometry("920x480")
+        self.window.geometry("840x480")
         self.window.transient(app.root)
 
         outer = Frame(self.window, padx=8, pady=8)
@@ -6210,15 +6210,6 @@ class BackendManagerWindow:
             bg="#3d6d3d",
             fg="white",
             command=self.attach_tmux,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            action_row,
-            text="View Output",
-            width=14,
-            bg="#2f5597",
-            fg="white",
-            command=self.open_output_viewer,
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
@@ -6361,9 +6352,6 @@ class BackendManagerWindow:
             return
 
         self.refresh_info()
-
-    def open_output_viewer(self):
-        TerminalOutputViewerWindow(self.app)
 
     def pick_tmux_target(self):
         try:
@@ -6805,33 +6793,7 @@ class TmuxBackend:
 
         self.app.set_status(f"Attached tmux session: {session}")
 
-    def capture_output(self, lines: int = 200) -> str:
-        self.ensure_session()
 
-        target = self.target()
-
-        result = subprocess.run(
-            [
-                "tmux",
-                "capture-pane",
-                "-t",
-                target,
-                "-p",
-                "-S",
-                f"-{int(lines)}",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        if result.returncode != 0:
-            raise TermForgeError(
-                "tmux capture-pane failed:\n\n"
-                f"{result.stderr}"
-            )
-
-        return result.stdout
 
     def get_mode(self) -> str:
         return str(getattr(self.app.cfg, "TmuxMode", "pane") or "pane").lower()
@@ -6980,13 +6942,12 @@ class TmuxTargetPickerWindow:
         self.app.set_status(f"Selected tmux target: {target}")
         self.window.destroy()
 
-class TerminalOutputViewerWindow:
+class WorkflowLiveMonitorWindow:
     def __init__(self, app):
         self.app = app
-
         self.window = Toplevel(app.root)
-        self.window.title("Terminal Output Viewer")
-        self.window.geometry("1100x720")
+        self.window.title("Workflow Live Monitor")
+        self.window.geometry("980x620")
         self.window.transient(app.root)
 
         outer = Frame(self.window, padx=8, pady=8)
@@ -6994,7 +6955,7 @@ class TerminalOutputViewerWindow:
 
         Label(
             outer,
-            text="Terminal Output Viewer",
+            text="Workflow Live Monitor",
             bd=4,
             width=38,
             bg="lightgreen",
@@ -7002,223 +6963,139 @@ class TerminalOutputViewerWindow:
             relief="raised",
         ).pack(pady=(0, 8))
 
-        controls = Frame(outer)
-        controls.pack(fill=X, pady=(0, 8))
-
-        Label(controls, text="Source:", width=8, anchor="w").pack(side=LEFT)
-
-        self.source_var = StringVar(value="tmux")
-        self.source_menu = OptionMenu(
-            controls,
-            self.source_var,
-            "tmux",
-            "file",
-        )
-        self.source_menu.config(width=12)
-        self.source_menu.pack(side=LEFT, padx=(0, 8))
-
-        Label(controls, text="Lines:", width=6, anchor="w").pack(side=LEFT)
-
-        self.lines_var = StringVar(value="200")
-        Entry(
-            controls,
-            textvariable=self.lines_var,
-            width=8,
-        ).pack(side=LEFT, padx=(0, 8))
-
-        Label(controls, text="File:", width=5, anchor="w").pack(side=LEFT)
-
-        self.file_var = StringVar()
-        Entry(
-            controls,
-            textvariable=self.file_var,
-            width=48,
-        ).pack(side=LEFT, fill=X, expand=True, padx=(0, 8))
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
 
         Button(
-            controls,
-            text="Browse",
-            width=10,
-            bg="#555577",
-            fg="white",
-            command=self.browse_file,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            controls,
+            action_row,
             text="Refresh",
-            width=12,
+            width=14,
             bg="navy",
             fg="white",
             command=self.refresh,
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
-            controls,
+            action_row,
             text="Copy",
-            width=10,
+            width=14,
             bg="#2f5597",
             fg="white",
-            command=self.copy_output,
+            command=self.copy_report,
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
-            controls,
-            text="Save As",
-            width=10,
-            bg="darkgreen",
-            fg="white",
-            command=self.save_as,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            controls,
+            action_row,
             text="Close",
-            width=10,
+            width=14,
             bg="red",
             fg="black",
             command=self.window.destroy,
         ).pack(side=RIGHT)
 
-        self.info = Label(
+        self.summary = Text(outer, wrap="word", height=7)
+        self.summary.pack(fill=X, pady=(0, 8))
+
+        self.listbox = Listbox(
             outer,
-            text="",
-            anchor="w",
-            justify=LEFT,
-        )
-        self.info.pack(fill=X, pady=(0, 4))
-
-        text_frame = Frame(outer)
-        text_frame.pack(fill=BOTH, expand=True)
-
-        self.output = Text(
-            text_frame,
-            wrap="none",
             width=130,
-            height=34,
+            height=18,
+            exportselection=False,
         )
-        self.output.pack(side=LEFT, fill=BOTH, expand=True)
+        self.listbox.pack(fill=BOTH, expand=True)
 
-        yscroll = Scrollbar(text_frame, command=self.output.yview)
-        yscroll.pack(side=RIGHT, fill=Y)
-        self.output.config(yscrollcommand=yscroll.set)
+        self.details = Text(outer, wrap="word", height=10)
+        self.details.pack(fill=BOTH, expand=True, pady=(8, 0))
+
+        self.snapshot = []
+        self.listbox.bind("<<ListboxSelect>>", self.on_select)
 
         self.refresh()
+        self.auto_refresh()
 
-    def get_lines(self) -> int:
-        try:
-            value = int(self.lines_var.get().strip())
-            return max(value, 1)
-        except Exception:
-            return 200
-
-    def browse_file(self):
-        path = filedialog.askopenfilename(
-            title="Open output/log file",
-            filetypes=[
-                ("Text files", "*.txt *.log *.out *.err"),
-                ("All files", "*.*"),
-            ],
-        )
-
-        if path:
-            self.file_var.set(path)
-            self.source_var.set("file")
-            self.refresh()
-
-    def load_tmux_output(self) -> str:
-        backend = self.app.backend
-
-        if not isinstance(backend, TmuxBackend):
-            backend = TmuxBackend(self.app)
-
-        return backend.capture_output(
-            lines=self.get_lines(),
-        )
-
-    def load_file_output(self) -> str:
-        path = self.file_var.get().strip()
-
-        if not path:
-            raise TermForgeError("Select a file first.")
-
-        p = Path(path).expanduser()
-
-        if not p.exists():
-            raise TermForgeError(f"File does not exist: {p}")
-
-        lines = self.get_lines()
-
-        try:
-            text = p.read_text(encoding="utf-8", errors="replace")
-        except TypeError:
-            text = p.read_text(encoding="utf-8")
-
-        split = text.splitlines()
-        return "\n".join(split[-lines:])
+    def get_state(self):
+        return getattr(self.app, "current_workflow_state", None)
 
     def refresh(self):
-        source = self.source_var.get().strip()
+        state = self.get_state()
 
-        try:
-            if source == "file":
-                text = self.load_file_output()
-                label = f"File output: {self.file_var.get().strip()}"
-            else:
-                text = self.load_tmux_output()
-                label = (
-                    "tmux output: "
-                    f"session={getattr(self.app.cfg, 'TmuxSession', 'termforge')} "
-                    f"target={getattr(self.app.cfg, 'TmuxPane', '') or '(session default)'}"
-                )
+        self.summary.delete("1.0", END)
+        self.listbox.delete(0, END)
 
-        except Exception as exc:
-            text = ""
-            label = f"Error: {exc}"
+        if not state:
+            self.summary.insert(
+                "1.0",
+                "No workflow is currently running.",
+            )
+            self.snapshot = []
+            return
 
-        self.info.config(text=label)
+        steps = state.get("steps", {})
+        total = state.get("total", 0)
 
-        self.output.delete("1.0", END)
-        self.output.insert("1.0", text)
+        success = sum(1 for s in steps.values() if s.get("status") == "success")
+        failed = sum(1 for s in steps.values() if s.get("status") == "failed")
+        skipped = sum(1 for s in steps.values() if s.get("status") == "skipped")
+        running = sum(1 for s in steps.values() if s.get("status") == "running")
 
-    def copy_output(self):
-        text = self.output.get("1.0", END).strip()
+        self.summary.insert(
+            "1.0",
+            f"Workflow: {state.get('name')}\n"
+            f"Mode: {state.get('mode')}\n"
+            f"Status: {state.get('status')}\n"
+            f"Started: {state.get('started_at')}\n"
+            f"Finished: {state.get('finished_at') or '(running)'}\n"
+            f"Progress: success={success}, failed={failed}, "
+            f"skipped={skipped}, running={running}, total={total}",
+        )
+
+        self.snapshot = list(steps.values())
+
+        for step in self.snapshot:
+            self.listbox.insert(
+                END,
+                f"[{step.get('status', '')}] "
+                f"{step.get('id', '')} "
+                f"started={step.get('started_at', '')} "
+                f"finished={step.get('finished_at', '')} "
+                f"{step.get('message', '')}",
+            )
+
+    def on_select(self, _event=None):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return
+
+        index = idxs[0]
+
+        if index < 0 or index >= len(self.snapshot):
+            return
+
+        self.details.delete("1.0", END)
+        self.details.insert(
+            "1.0",
+            pprint.pformat(self.snapshot[index], indent=4),
+        )
+
+    def copy_report(self):
+        state = self.get_state() or {}
 
         self.window.clipboard_clear()
-        self.window.clipboard_append(text)
+        self.window.clipboard_append(pprint.pformat(state, indent=4))
         self.window.update()
 
         messagebox.showinfo(
-            "Terminal Output Viewer",
-            "Output copied to clipboard.",
+            "Workflow Live Monitor",
+            "Workflow monitor report copied.",
         )
 
-    def save_as(self):
-        text = self.output.get("1.0", END)
-
-        target = filedialog.asksaveasfilename(
-            title="Save Terminal Output",
-            defaultextension=".txt",
-            initialfile="termforge_terminal_output.txt",
-            filetypes=[
-                ("Text files", "*.txt"),
-                ("Log files", "*.log"),
-                ("All files", "*.*"),
-            ],
-        )
-
-        if not target:
-            return
-
-        Path(target).write_text(
-            text,
-            encoding="utf-8",
-        )
-
-        messagebox.showinfo(
-            "Terminal Output Viewer",
-            f"Saved output to:\n\n{target}",
-        )
+    def auto_refresh(self):
+        try:
+            if self.window.winfo_exists():
+                self.refresh()
+                self.window.after(1000, self.auto_refresh)
+        except Exception:
+            pass
 
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
@@ -7252,6 +7129,8 @@ class TermForgeApp:
         self.current_process = None
         self.current_process_job = None
         self.current_environment = None
+        self.current_workflow_state = None
+        self.workflow_history = []
 
         self.backend = self.create_backend()
 
@@ -7458,6 +7337,70 @@ class TermForgeApp:
         finally:
             self.root.destroy()
 
+    def open_workflow_live_monitor(self):
+        WorkflowLiveMonitorWindow(self)
+
+    def start_workflow_state(self, name: str, total: int, mode: str = "sequential"):
+        self.current_workflow_state = {
+            "name": name,
+            "mode": mode,
+            "total": total,
+            "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "finished_at": "",
+            "status": "running",
+            "steps": {},
+        }
+
+
+    def update_workflow_step_state(
+        self,
+        step_id: str,
+        status: str,
+        message: str = "",
+    ):
+        if not self.current_workflow_state:
+            return
+
+        steps = self.current_workflow_state.setdefault("steps", {})
+
+        row = steps.setdefault(
+            step_id,
+            {
+                "id": step_id,
+                "status": "",
+                "started_at": "",
+                "finished_at": "",
+                "message": "",
+            },
+        )
+
+        row["status"] = status
+        row["message"] = message
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        if status == "running" and not row.get("started_at"):
+            row["started_at"] = now
+
+        if status in ("success", "failed", "skipped"):
+            row["finished_at"] = now
+
+
+    def finish_workflow_state(self, status: str = "finished"):
+        if not self.current_workflow_state:
+            return
+
+        self.current_workflow_state["status"] = status
+        self.current_workflow_state["finished_at"] = datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        self.workflow_history.insert(0, dict(self.current_workflow_state))
+        del self.workflow_history[50:]
+
+    def open_terminal_output_viewer(self):
+        TerminalOutputViewerWindow(self)
+
     def detect_session_type(self) -> str:
         session = os.environ.get("XDG_SESSION_TYPE", "").strip().lower()
 
@@ -7472,8 +7415,6 @@ class TermForgeApp:
 
         return "unknown"
 
-    def open_terminal_output_viewer(self):
-        TerminalOutputViewerWindow(self)
 
     def backend_health_report(self) -> dict:
         session = self.detect_session_type()
@@ -7666,6 +7607,13 @@ class TermForgeApp:
         skipped = set()
 
         total = len(step_map)
+
+        self.start_workflow_state(
+            name,
+            total,
+            mode="dependency-wave",
+        )
+
         runner = self.get_chain_runner(total)
         runner.log("──", f"Dependency workflow started — {name}")
 
@@ -7676,9 +7624,22 @@ class TermForgeApp:
             iterations += 1
 
             if iterations > max_iterations:
-                runner.step_failed(
-                    "Workflow stopped: dependency loop safety limit reached."
-                )
+                message = "Workflow stopped: dependency loop safety limit reached."
+                runner.step_failed(message)
+
+                for step_id in step_map:
+                    if (
+                        step_id not in completed
+                        and step_id not in failed
+                        and step_id not in skipped
+                    ):
+                        skipped.add(step_id)
+                        self.update_workflow_step_state(
+                            step_id,
+                            "skipped",
+                            message,
+                        )
+
                 break
 
             ready = []
@@ -7716,6 +7677,12 @@ class TermForgeApp:
                 if run_if == "never":
                     skipped.add(step_id)
                     runner.step_done(f"Skipped by run_if=never: {step_id}")
+
+                    self.update_workflow_step_state(
+                        step_id,
+                        "skipped",
+                        "Skipped by run_if=never",
+                    )
                     continue
 
                 if run_if == "success" and dep_failed:
@@ -7723,12 +7690,24 @@ class TermForgeApp:
                     runner.step_done(
                         f"Skipped because dependency failed: {step_id}"
                     )
+
+                    self.update_workflow_step_state(
+                        step_id,
+                        "skipped",
+                        "Skipped because dependency failed",
+                    )
                     continue
 
                 if run_if == "failed" and not dep_failed:
                     skipped.add(step_id)
                     runner.step_done(
                         f"Skipped because no dependency failed: {step_id}"
+                    )
+
+                    self.update_workflow_step_state(
+                        step_id,
+                        "skipped",
+                        "Skipped because no dependency failed",
                     )
                     continue
 
@@ -7745,8 +7724,13 @@ class TermForgeApp:
 
                 for step_id in unresolved:
                     skipped.add(step_id)
-                    runner.step_failed(
-                        f"Skipped unresolved workflow step: {step_id}"
+                    message = f"Skipped unresolved workflow step: {step_id}"
+                    runner.step_failed(message)
+
+                    self.update_workflow_step_state(
+                        step_id,
+                        "skipped",
+                        message,
                     )
 
                 break
@@ -7754,6 +7738,12 @@ class TermForgeApp:
             results = []
 
             for step_id, step in ready:
+                self.update_workflow_step_state(
+                    step_id,
+                    "running",
+                    "Running dependency-wave step",
+                )
+
                 runner.step_running(
                     len(completed) + len(failed) + len(skipped) + 1,
                     total,
@@ -7766,11 +7756,25 @@ class TermForgeApp:
             for step_id, ok, error in results:
                 if ok:
                     completed.add(step_id)
+
                     runner.step_done(f"Workflow step complete: {step_id}")
+
+                    self.update_workflow_step_state(
+                        step_id,
+                        "success",
+                        "Step completed",
+                    )
                 else:
                     failed.add(step_id)
+
                     runner.step_failed(
                         f"Workflow step failed: {step_id}: {error}"
+                    )
+
+                    self.update_workflow_step_state(
+                        step_id,
+                        "failed",
+                        error,
                     )
 
         self.add_history_entry(
@@ -7786,6 +7790,9 @@ class TermForgeApp:
             f"{len(failed)} failed, "
             f"{len(skipped)} skipped."
         )
+
+        final_status = "failed" if failed else "finished"
+        self.finish_workflow_state(final_status)
 
         runner.finished()
 
@@ -7911,14 +7918,12 @@ class TermForgeApp:
 
         return errors
 
-
     def run_workflow(
         self,
         name: str,
         source: str = "workflow",
         start_at: str | None = None,
     ) -> None:
-
         workflows = self.get_workflows()
         steps = workflows.get(name)
 
@@ -7927,18 +7932,38 @@ class TermForgeApp:
 
         errors = self.validate_workflow(steps)
         if errors:
-            raise TermForgeError("Workflow validation failed:\n" + "\n".join(errors))
+            raise TermForgeError(
+                "Workflow validation failed:\n" + "\n".join(errors)
+            )
 
         completed = set()
         failed = set()
 
+        total = len(steps)
+
+        self.start_workflow_state(
+            name,
+            total,
+            mode="sequential",
+        )
+
         start_found = start_at is None
 
-        total = len(steps)
         runner = self.get_chain_runner(total)
         runner.log("──", f"Workflow started — {name}")
 
         for index, step in enumerate(steps, start=1):
+            if not isinstance(step, dict):
+                message = f"Invalid workflow step: {step!r}"
+                runner.step_failed(message)
+                failed.add(f"step-{index}")
+                self.update_workflow_step_state(
+                    f"step-{index}",
+                    "failed",
+                    message,
+                )
+                continue
+
             step_id = str(step.get("id", f"step-{index}")).strip()
 
             if not start_found:
@@ -7946,15 +7971,27 @@ class TermForgeApp:
                     start_found = True
                 else:
                     completed.add(step_id)
-                    runner.step_done(f"Skipped before retry start: {step_id}")
+                    runner.step_done(
+                        f"Skipped before retry start: {step_id}"
+                    )
+                    self.update_workflow_step_state(
+                        step_id,
+                        "skipped",
+                        "Skipped before retry start",
+                    )
                     continue
 
             depends_on = step.get("depends_on", [])
 
-            run_if = str(step.get("run_if", "always")).strip().lower() or "always"
-
             if isinstance(depends_on, str):
                 depends_on = [depends_on]
+
+            run_if = (
+                str(step.get("run_if", "always"))
+                .strip()
+                .lower()
+                or "always"
+            )
 
             missing = [
                 dep for dep in depends_on
@@ -7962,23 +7999,50 @@ class TermForgeApp:
             ]
 
             if missing:
-                message = f"Skipped {step_id}; unknown/unmet dependencies: {missing}"
+                message = (
+                    f"Skipped {step_id}; unknown/unmet dependencies: "
+                    f"{missing}"
+                )
                 runner.step_failed(message)
                 failed.add(step_id)
+                self.update_workflow_step_state(
+                    step_id,
+                    "failed",
+                    message,
+                )
                 continue
 
             dep_failed = any(dep in failed for dep in depends_on)
 
             if run_if == "never":
                 runner.step_done(f"Skipped by run_if=never: {step_id}")
+                self.update_workflow_step_state(
+                    step_id,
+                    "skipped",
+                    "Skipped by run_if=never",
+                )
                 continue
 
             if run_if == "success" and dep_failed:
-                runner.step_done(f"Skipped because dependency failed: {step_id}")
+                runner.step_done(
+                    f"Skipped because dependency failed: {step_id}"
+                )
+                self.update_workflow_step_state(
+                    step_id,
+                    "skipped",
+                    "Skipped because dependency failed",
+                )
                 continue
 
             if run_if == "failed" and not dep_failed:
-                runner.step_done(f"Skipped because no dependency failed: {step_id}")
+                runner.step_done(
+                    f"Skipped because no dependency failed: {step_id}"
+                )
+                self.update_workflow_step_state(
+                    step_id,
+                    "skipped",
+                    "Skipped because no dependency failed",
+                )
                 continue
 
             environment = step.get("environment", "")
@@ -7986,7 +8050,17 @@ class TermForgeApp:
             command = step.get("command")
 
             try:
-                runner.step_running(index, total, f"workflow step {step_id}")
+                self.update_workflow_step_state(
+                    step_id,
+                    "running",
+                    "Running workflow step",
+                )
+
+                runner.step_running(
+                    index,
+                    total,
+                    f"workflow step {step_id}",
+                )
 
                 if environment:
                     self.set_current_environment(str(environment))
@@ -7995,17 +8069,18 @@ class TermForgeApp:
                     self.select_window_profile(str(profile))
 
                 if isinstance(command, str):
-                    # category/command reference: "Category/Command"
                     if "/" in command:
                         category, cmd_name = command.split("/", 1)
                         self.select_cmd(None, category, cmd_name)
                     else:
                         raise TermForgeError(
-                            f"Workflow command string must be Category/Command: {command}"
+                            "Workflow command string must be "
+                            f"Category/Command: {command}"
                         )
 
                 elif isinstance(command, (list, tuple)):
                     cmd_type, cmd_text, options = parse_command_entry(command)
+
                     self.run_cmd(
                         cmd_type,
                         cmd_text,
@@ -8016,19 +8091,40 @@ class TermForgeApp:
 
                 else:
                     raise TermForgeError(
-                        f"Invalid workflow command for step {step_id}: {command!r}"
+                        f"Invalid workflow command for step "
+                        f"{step_id}: {command!r}"
                     )
 
                 completed.add(step_id)
-                runner.step_done(f"Workflow step complete: {step_id}")
+
+                runner.step_done(
+                    f"Workflow step complete: {step_id}"
+                )
+
+                self.update_workflow_step_state(
+                    step_id,
+                    "success",
+                    "Step completed",
+                )
 
             except Exception as exc:
                 failed.add(step_id)
-                runner.step_failed(f"Workflow step failed: {step_id}: {exc}")
+
+                runner.step_failed(
+                    f"Workflow step failed: {step_id}: {exc}"
+                )
+
+                self.update_workflow_step_state(
+                    step_id,
+                    "failed",
+                    str(exc),
+                )
+
                 self.show_traceback_window(
                     f"Workflow Step Failed: {name}/{step_id}",
                     exc,
                 )
+
                 continue
 
         self.add_history_entry(
@@ -8040,6 +8136,9 @@ class TermForgeApp:
         self.set_status(
             f"Workflow {name}: {len(completed)}/{total} completed."
         )
+
+        final_status = "failed" if failed else "finished"
+        self.finish_workflow_state(final_status)
 
         runner.finished()
 
@@ -10610,6 +10709,7 @@ class TermForgeApp:
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         automation_menu = Menu(menubar, tearoff=0)
+        automation_menu.add_command(label="Workflow Live Monitor", command=self.open_workflow_live_monitor,)
         automation_menu.add_command(label="Schedule Manager", command=self.open_schedule_manager)
         automation_menu.add_command(label="Schedule History", command=self.open_schedule_history)
         automation_menu.add_command(label="Execution Queue", command=self.open_execution_queue)
