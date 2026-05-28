@@ -5295,19 +5295,27 @@ class WorkflowManagerWindow:
             relief="raised",
         ).pack(pady=(0, 8))
 
-        action_row = Frame(outer)
-        action_row.pack(fill=X, pady=(0, 8))
+        action_outer = Frame(outer)
+        action_outer.pack(fill=X, pady=(0, 8))
 
-        Button(action_row, text="Save", width=14, bg="darkgreen", fg="white", command=self.save_workflow).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Run", width=14, bg="#2f5597", fg="white", command=self.run_workflow).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Run Parallel", width=14, bg="#3d6d3d", fg="white", command=self.run_parallel_workflow,).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Validate", width=14, bg="#555577", fg="white", command=self.validate_workflow).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Queue", width=14, bg="#2f5597", fg="white", command=self.queue_workflow,).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Visualizer", width=14, bg="#555577", fg="white", command=self.visualize_workflow,).pack(side=LEFT, padx=(0,6))
-        Button(action_row, text="Retry From Step", width=16, bg="#2f5597", fg="white", command=self.retry_from_step,).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Delete", width=14, bg="#7f6000", fg="white", command=self.delete_workflow).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Refresh", width=14, bg="navy", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
+        action_row1 = Frame(action_outer)
+        action_row1.pack(fill=X)
+
+        Button(action_row1, text="Run Workflow", width=14, bg="#2f5597", fg="white", command=self.run_workflow).pack(side=LEFT, padx=(0, 6))
+        Button(action_row1, text="Queue", width=14, bg="#2f5597", fg="white", command=self.queue_workflow,).pack(side=LEFT, padx=(0, 6))
+        Button(action_row1, text="Run Parallel", width=14, bg="#3d6d3d", fg="white", command=self.run_parallel_workflow,).pack(side=LEFT, padx=(0, 6))
+        Button(action_row1, text="Retry From Step", width=16, bg="#2f5597", fg="white", command=self.retry_from_step,).pack(side=LEFT, padx=(0, 6))
+        Button(action_row1, text="Visualizer", width=14, bg="#555577", fg="white", command=self.visualize_workflow,).pack(side=LEFT, padx=(0,6))
+
+        action_row2 = Frame(action_outer)
+        action_row2.pack(fill=X, pady=(4, 0))
+
+        Button(action_row2, text="Save", width=14, bg="darkgreen", fg="white", command=self.save_workflow).pack(side=LEFT, padx=(0, 6))
+        Button(action_row2, text="Validate", width=14, bg="#555577", fg="white", command=self.validate_workflow).pack(side=LEFT, padx=(0, 6))
+        Button(action_row2, text="Delete", width=14, bg="#7f6000", fg="white", command=self.delete_workflow).pack(side=LEFT, padx=(0, 6))
+        Button(action_row2, text="Refresh", width=14, bg="navy", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
+        Button(action_row2, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
+
 
         body = Frame(outer)
         body.pack(fill=BOTH, expand=True)
@@ -7097,6 +7105,212 @@ class WorkflowLiveMonitorWindow:
         except Exception:
             pass
 
+class WorkflowHistoryViewerWindow:
+    def __init__(self, app):
+        self.app = app
+
+        self.window = Toplevel(app.root)
+        self.window.title("Workflow History Viewer")
+        self.window.geometry("1060x680")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Workflow History Viewer",
+            bd=4,
+            width=40,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(
+            action_row,
+            text="Copy Selected",
+            width=16,
+            bg="#2f5597",
+            fg="white",
+            command=self.copy_selected,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Clear History",
+            width=16,
+            bg="#7f6000",
+            fg="white",
+            command=self.clear_history,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Close",
+            width=14,
+            bg="red",
+            fg="black",
+            command=self.window.destroy,
+        ).pack(side=RIGHT)
+
+        body = Frame(outer)
+        body.pack(fill=BOTH, expand=True)
+
+        left = Frame(body)
+        left.pack(side=LEFT, fill=BOTH, expand=True)
+
+        right = Frame(body)
+        right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
+
+        self.listbox = Listbox(
+            left,
+            width=58,
+            height=28,
+            exportselection=False,
+        )
+        self.listbox.pack(side=LEFT, fill=BOTH, expand=True)
+
+        scrollbar = Scrollbar(left, command=self.listbox.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self.listbox.config(yscrollcommand=scrollbar.set)
+
+        self.details = Text(
+            right,
+            wrap="word",
+            width=72,
+            height=30,
+        )
+        self.details.pack(fill=BOTH, expand=True)
+
+        self.snapshot = []
+        self.listbox.bind("<<ListboxSelect>>", self.on_select)
+
+        self.refresh()
+        self.auto_refresh()
+
+    def refresh(self):
+        new_snapshot = list(getattr(self.app, "workflow_history", []))
+
+        if new_snapshot == getattr(self, "snapshot", None):
+            return
+
+        self.snapshot = new_snapshot
+
+        self.listbox.delete(0, END)
+        self.details.delete("1.0", END)
+
+        if not self.snapshot:
+            self.details.insert(
+                "1.0",
+                "No workflow history yet.",
+            )
+            return
+
+        for item in self.snapshot:
+            steps = item.get("steps", {})
+            success = sum(
+                1 for step in steps.values()
+                if step.get("status") == "success"
+            )
+            failed = sum(
+                1 for step in steps.values()
+                if step.get("status") == "failed"
+            )
+            skipped = sum(
+                1 for step in steps.values()
+                if step.get("status") == "skipped"
+            )
+
+            self.listbox.insert(
+                END,
+                f"{item.get('started_at', '')} "
+                f"[{item.get('status', '')}] "
+                f"{item.get('name', '')} "
+                f"mode={item.get('mode', '')} "
+                f"ok={success} fail={failed} skip={skipped}",
+            )
+
+    def selected_item(self):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return None
+
+        index = idxs[0]
+
+        if index < 0 or index >= len(self.snapshot):
+            return None
+
+        return self.snapshot[index]
+
+    def on_select(self, _event=None):
+        item = self.selected_item()
+
+        if item is None:
+            return
+
+        self.details.delete("1.0", END)
+        self.details.insert(
+            "1.0",
+            pprint.pformat(item, indent=4),
+        )
+
+    def copy_selected(self):
+        item = self.selected_item()
+
+        if item is None:
+            messagebox.showerror(
+                "Workflow History Viewer",
+                "Select a workflow history entry first.",
+            )
+            return
+
+        self.window.clipboard_clear()
+        self.window.clipboard_append(
+            pprint.pformat(item, indent=4),
+        )
+        self.window.update()
+
+        messagebox.showinfo(
+            "Workflow History Viewer",
+            "Selected workflow history copied.",
+        )
+
+    def clear_history(self):
+        if not messagebox.askokcancel(
+            "Clear Workflow History",
+            "Clear all workflow history entries?",
+        ):
+            return
+
+        self.app.workflow_history = []
+        self.refresh()
+
+    def auto_refresh(self):
+        try:
+            if not self.window.winfo_exists():
+                return
+
+            current = self.listbox.curselection()
+
+            self.refresh()
+
+            if current:
+                index = current[0]
+
+                if 0 <= index < self.listbox.size():
+                    self.listbox.selection_set(index)
+                    self.listbox.activate(index)
+                    self.on_select()
+
+            self.window.after(2000, self.auto_refresh)
+
+        except Exception:
+            pass
+
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
         self.root = root
@@ -7336,6 +7550,9 @@ class TermForgeApp:
             self.root.quit()
         finally:
             self.root.destroy()
+
+    def open_workflow_history_viewer(self):
+        WorkflowHistoryViewerWindow(self)
 
     def open_workflow_live_monitor(self):
         WorkflowLiveMonitorWindow(self)
@@ -10709,7 +10926,6 @@ class TermForgeApp:
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         automation_menu = Menu(menubar, tearoff=0)
-        automation_menu.add_command(label="Workflow Live Monitor", command=self.open_workflow_live_monitor,)
         automation_menu.add_command(label="Schedule Manager", command=self.open_schedule_manager)
         automation_menu.add_command(label="Schedule History", command=self.open_schedule_history)
         automation_menu.add_command(label="Execution Queue", command=self.open_execution_queue)
@@ -10729,6 +10945,8 @@ class TermForgeApp:
         automation_menu.add_command(label="Toggle Execution Queue Pause", command=self.toggle_execution_queue_pause)
         automation_menu.add_separator()
         automation_menu.add_command(label="Workflow Manager", command=self.open_workflow_manager,)
+        automation_menu.add_command(label="Workflow Live Monitor", command=self.open_workflow_live_monitor,)
+        automation_menu.add_command(label="Workflow History Viewer", command=self.open_workflow_history_viewer,)
         menubar.add_cascade(label="Automation", menu=automation_menu)
 
         profiles_menu = Menu(menubar, tearoff=0)
