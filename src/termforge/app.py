@@ -1,4 +1,10 @@
 from __future__ import annotations
+from .backends.core import (
+    BackendError,
+    X11Backend,
+    SubprocessBackend,
+    TmuxBackend,
+)
 import importlib.util
 import json
 import logging
@@ -133,6 +139,7 @@ def ensure_user_config() -> None:
         "Backend = x11",
         f"TmuxSession = {repr(tmux_session)}",
         f"TmuxPane = {repr(tmux_pane)}",
+        "SharedVariables = {}",
         "",
     ]
     backup_dir = Path(getattr(cfg, "BackupDir", CONFIG_DIR / "backups"))
@@ -6081,156 +6088,156 @@ class WorkflowVisualizerWindow:
     </body>
     </html>
     """
-class X11Backend:
-    name = "x11"
+# class X11Backend:
+#     name = "x11"
+# 
+#     def __init__(self, app):
+#         self.app = app
+# 
+#     def select_target(self):
+#         return self.app.select_target_window()
+# 
+#     def send_text(self, text: str, record_history: bool = True):
+#         self.ensure_session()
+# 
+#         target = self.target()
+# 
+#         subprocess.run(
+#             ["tmux", "send-keys", "-t", target, "-l", text],
+#             check=True,
+#         )
+# 
+#         subprocess.run(
+#             ["tmux", "send-keys", "-t", target, "Enter"],
+#             check=True,
+#         )
+# 
+#         self.app.set_status(f"Sent command to tmux: {target}")
+# 
+#         if record_history:
+#             self.app.add_history_entry(
+#                 "tmux",
+#                 text,
+#                 source="backend",
+#             )
+# 
+#     def run_detached(self, command: str, record_history: bool = True):
+#         return self.app.run_detached(
+#             command,
+#             record_history=record_history,
+#         )
 
-    def __init__(self, app):
-        self.app = app
+# class SubprocessBackend:
+#     name = "subprocess"
+# 
+#     def __init__(self, app):
+#         self.app = app
+# 
+#     def select_target(self):
+#         self.app.set_status("Subprocess backend does not use target windows.")
+# 
+#     def send_text(self, text: str, record_history: bool = True):
+#         return self.run_detached(text, record_history=record_history)
+# 
+#     def run_detached(self, command: str, record_history: bool = True):
+#         proc = subprocess.Popen(command, shell=True)
+# 
+#         self.app.current_process = proc
+#         self.app.current_process_job = {
+#             "category": "",
+#             "command": command,
+#             "source": "subprocess",
+#             "pid": proc.pid,
+#             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+#         }
+# 
+#         self.app.set_status(f"Started subprocess PID {proc.pid}")
+# 
+#         if record_history:
+#             self.app.add_history_entry(
+#                 "subprocess",
+#                 command,
+#                 source="backend",
+#             )
 
-    def select_target(self):
-        return self.app.select_target_window()
-
-    def send_text(self, text: str, record_history: bool = True):
-        self.ensure_session()
-
-        target = self.target()
-
-        subprocess.run(
-            ["tmux", "send-keys", "-t", target, "-l", text],
-            check=True,
-        )
-
-        subprocess.run(
-            ["tmux", "send-keys", "-t", target, "Enter"],
-            check=True,
-        )
-
-        self.app.set_status(f"Sent command to tmux: {target}")
-
-        if record_history:
-            self.app.add_history_entry(
-                "tmux",
-                text,
-                source="backend",
-            )
-
-    def run_detached(self, command: str, record_history: bool = True):
-        return self.app.run_detached(
-            command,
-            record_history=record_history,
-        )
-
-class SubprocessBackend:
-    name = "subprocess"
-
-    def __init__(self, app):
-        self.app = app
-
-    def select_target(self):
-        self.app.set_status("Subprocess backend does not use target windows.")
-
-    def send_text(self, text: str, record_history: bool = True):
-        return self.run_detached(text, record_history=record_history)
-
-    def run_detached(self, command: str, record_history: bool = True):
-        proc = subprocess.Popen(command, shell=True)
-
-        self.app.current_process = proc
-        self.app.current_process_job = {
-            "category": "",
-            "command": command,
-            "source": "subprocess",
-            "pid": proc.pid,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-
-        self.app.set_status(f"Started subprocess PID {proc.pid}")
-
-        if record_history:
-            self.app.add_history_entry(
-                "subprocess",
-                command,
-                source="backend",
-            )
-
-class X11Backend:
-    name = "x11"
-    label = "X11 / xdotool / libxdo"
-    description = (
-        "Uses the current X11 target-window behavior. "
-        "Best for Ubuntu Xorg/X11 sessions."
-    )
-
-    def __init__(self, app):
-        self.app = app
-
-    def is_available(self) -> bool:
-        return shutil.which("xdotool") is not None
-
-    def select_target(self):
-        return self.app.select_target_window()
-
-    def send_text(self, text: str, record_history: bool = True):
-        return self.app.send_to_selected_window(
-            text,
-            record_history=record_history,
-        )
-
-    def run_detached(self, command: str, record_history: bool = True):
-        return self.app.run_detached(
-            command,
-            record_history=record_history,
-        )
-
-
-class SubprocessBackend:
-    name = "subprocess"
-    label = "Subprocess / Direct Shell"
-    description = (
-        "Runs commands directly with subprocess. "
-        "Works across X11, Wayland, GNOME Shell, SSH sessions, and headless use. "
-        "Does not type into a selected terminal window."
-    )
-
-    def __init__(self, app):
-        self.app = app
-
-    def is_available(self) -> bool:
-        return True
-
-    def select_target(self):
-        self.app.set_status(
-            "Subprocess backend does not use target windows."
-        )
-
-    def send_text(self, text: str, record_history: bool = True):
-        return self.run_detached(
-            text,
-            record_history=record_history,
-        )
-
-    def run_detached(self, command: str, record_history: bool = True):
-        proc = subprocess.Popen(command, shell=True)
-
-        self.app.current_process = proc
-        self.app.current_process_job = {
-            "category": "",
-            "command": command,
-            "source": "subprocess",
-            "pid": proc.pid,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-
-        self.app.set_status(
-            f"Started subprocess PID {proc.pid}"
-        )
-
-        if record_history:
-            self.app.add_history_entry(
-                "subprocess",
-                command,
-                source="backend",
-            )
+# class X11Backend:
+#     name = "x11"
+#     label = "X11 / xdotool / libxdo"
+#     description = (
+#         "Uses the current X11 target-window behavior. "
+#         "Best for Ubuntu Xorg/X11 sessions."
+#     )
+# 
+#     def __init__(self, app):
+#         self.app = app
+# 
+#     def is_available(self) -> bool:
+#         return shutil.which("xdotool") is not None
+# 
+#     def select_target(self):
+#         return self.app.select_target_window()
+# 
+#     def send_text(self, text: str, record_history: bool = True):
+#         return self.app.send_to_selected_window(
+#             text,
+#             record_history=record_history,
+#         )
+# 
+#     def run_detached(self, command: str, record_history: bool = True):
+#         return self.app.run_detached(
+#             command,
+#             record_history=record_history,
+#         )
+# 
+# 
+# class SubprocessBackend:
+#     name = "subprocess"
+#     label = "Subprocess / Direct Shell"
+#     description = (
+#         "Runs commands directly with subprocess. "
+#         "Works across X11, Wayland, GNOME Shell, SSH sessions, and headless use. "
+#         "Does not type into a selected terminal window."
+#     )
+# 
+#     def __init__(self, app):
+#         self.app = app
+# 
+#     def is_available(self) -> bool:
+#         return True
+# 
+#     def select_target(self):
+#         self.app.set_status(
+#             "Subprocess backend does not use target windows."
+#         )
+# 
+#     def send_text(self, text: str, record_history: bool = True):
+#         return self.run_detached(
+#             text,
+#             record_history=record_history,
+#         )
+# 
+#     def run_detached(self, command: str, record_history: bool = True):
+#         proc = subprocess.Popen(command, shell=True)
+# 
+#         self.app.current_process = proc
+#         self.app.current_process_job = {
+#             "category": "",
+#             "command": command,
+#             "source": "subprocess",
+#             "pid": proc.pid,
+#             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+#         }
+# 
+#         self.app.set_status(
+#             f"Started subprocess PID {proc.pid}"
+#         )
+# 
+#         if record_history:
+#             self.app.add_history_entry(
+#                 "subprocess",
+#                 command,
+#                 source="backend",
+#             )
 
 class BackendManagerWindow:
     def __init__(self, app):
@@ -6612,306 +6619,327 @@ class BackendManagerWindow:
 #                 source="backend",
 #             )
 
-class TmuxBackend:
-    name = "tmux"
-    label = "tmux / Terminal Session"
-    description = (
-        "Sends commands to a tmux session/pane. "
-        "Works on X11, Wayland, SSH, and headless systems. "
-        "Best backend for terminal automation."
-    )
-
-    def __init__(self, app):
-        self.app = app
-
-    def get_mode(self) -> str:
-        return str(getattr(self.app.cfg, "TmuxMode", "pane") or "pane").lower()
-
-    def is_available(self) -> bool:
-        return shutil.which("tmux") is not None
-
-    def get_session(self) -> str:
-        return str(getattr(self.app.cfg, "TmuxSession", "termforge") or "termforge")
-
-    def get_pane(self) -> str:
-        return str(getattr(self.app.cfg, "TmuxPane", "") or "")
-
-    def list_targets(self) -> list[dict]:
-        if shutil.which("tmux") is None:
-            return []
-
-        result = subprocess.run(
-            [
-                "tmux",
-                "list-panes",
-                "-a",
-                "-F",
-                "#{session_name}|#{window_index}|#{window_name}|#{pane_index}|#{pane_id}|#{pane_current_command}|#{pane_active}",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        if result.returncode != 0:
-            return []
-
-        targets = []
-
-        for line in result.stdout.splitlines():
-            parts = line.split("|")
-
-            if len(parts) != 7:
-                continue
-
-            session, win_idx, win_name, pane_idx, pane_id, command, active = parts
-
-            target = f"{session}:{win_idx}.{pane_idx}"
-
-            targets.append(
-                {
-                    "session": session,
-                    "window_index": win_idx,
-                    "window_name": win_name,
-                    "pane_index": pane_idx,
-                    "pane_id": pane_id,
-                    "command": command,
-                    "active": active == "1",
-                    "target": target,
-                }
-            )
-
-        return targets
-
-    def target(self) -> str:
-        pane = self.get_pane().strip()
-        if pane:
-            return pane
-        return self.get_session()
-
-    def ensure_session(self) -> None:
-        if shutil.which("tmux") is None:
-            raise TermForgeError(
-                "tmux is not installed. Install it with:\n\n"
-                "sudo apt install tmux"
-            )
-
-        session = self.get_session()
-
-        result = subprocess.run(
-            ["tmux", "has-session", "-t", session],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        if result.returncode != 0:
-            subprocess.run(
-                ["tmux", "new-session", "-d", "-s", session],
-                check=True,
-            )
-
-    def attach_to_selected_window(self):
-        self.ensure_session()
-
-        window_id = self.app.get_selected_window_id()
-
-        if not window_id:
-            raise TermForgeError(
-                "No terminal window selected for tmux attach."
-            )
-
-        command = f"tmux attach -t {shlex.quote(self.get_session())}"
-
-        # Reuse TermForge's existing X11 send path.
-        self.app.send_to_selected_window(
-            command,
-            record_history=False,
-        )
-
-        self.app.set_status(
-            f"Attached tmux session in selected window: {window_id}"
-        )
-
-    def select_target(self):
-        self.ensure_session()
-
-        session = self.get_session()
-
-        result = subprocess.run(
-            [
-                "tmux",
-                "display-message",
-                "-p",
-                "-t",
-                session,
-                "#{session_name}:#{window_index}.#{pane_index}",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        if result.returncode != 0:
-            raise TermForgeError(
-                "Could not detect tmux target:\n\n"
-                f"{result.stderr}"
-            )
-
-        target = result.stdout.strip()
-
-        setattr(self.app.cfg, "TmuxPane", target)
-
-        self.app.persist_full_config()
-
-        self.app.set_status(
-            f"Selected tmux target: {target}"
-        )
-
-    def send_text(self, text: str, record_history: bool = True):
-        self.ensure_session()
-
-        target = self.target()
-
-        subprocess.run(
-            ["tmux", "send-keys", "-t", target, text],
-            check=True,
-        )
-
-        subprocess.run(
-            ["tmux", "send-keys", "-t", target, "C-m"],
-            check=True,
-        )
-
-        self.app.set_status(f"Sent command to tmux pane: {target}")
-
-        if record_history:
-            self.app.add_history_entry(
-                "tmux",
-                text,
-                source="backend",
-            )
-
-    def run_job_window(self, command: str, record_history: bool = True):
-        self.ensure_session()
-
-        session = self.get_session()
-
-        result = subprocess.run(
-            [
-                "tmux",
-                "new-window",
-                "-t",
-                f"{session}:",
-                "-n",
-                "termforge-job",
-                "bash",
-                "-lc",
-                f"{command}; echo; echo '[TermForge job complete]'; exec bash",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        if result.returncode != 0:
-            raise TermForgeError(
-                "tmux new-window failed:\n\n"
-                f"stdout:\n{result.stdout}\n\n"
-                f"stderr:\n{result.stderr}"
-            )
-
-        self.app.set_status(f"Started tmux job in session: {session}")
-
-        if record_history:
-            self.app.add_history_entry(
-                "tmux",
-                command,
-                source="backend",
-            )
-
-    def run_detached(self, command: str, record_history: bool = True):
-        mode = self.get_mode()
-
-        if mode == "job":
-            return self.run_job_window(
-                command,
-                record_history=record_history,
-            )
-
-        return self.send_text(
-            command,
-            record_history=record_history,
-        )
-
-    def attach(self):
-        self.ensure_session()
-
-        session = self.get_session()
-
-        terminal = getattr(self.app.cfg, "terminal", {}).get(
-            "application",
-            "gnome-terminal",
-        )
-
-# tilix
-
-#         subprocess.Popen(
+# class TmuxBackend:
+#     name = "tmux"
+#     label = "tmux / Terminal Session"
+#     description = (
+#         "Sends commands to a tmux session/pane. "
+#         "Works on X11, Wayland, SSH, and headless systems. "
+#         "Best backend for terminal automation."
+#     )
+# 
+#     def __init__(self, app):
+#         self.app = app
+# 
+#     def get_mode(self) -> str:
+#         return str(getattr(self.app.cfg, "TmuxMode", "pane") or "pane").lower()
+# 
+#     def is_available(self) -> bool:
+#         return shutil.which("tmux") is not None
+# 
+#     def get_session(self) -> str:
+#         return str(getattr(self.app.cfg, "TmuxSession", "termforge") or "termforge")
+# 
+#     def get_pane(self) -> str:
+#         return str(getattr(self.app.cfg, "TmuxPane", "") or "")
+# 
+#     def list_targets(self) -> list[dict]:
+#         if shutil.which("tmux") is None:
+#             return []
+# 
+#         result = subprocess.run(
 #             [
-#                 "tilix",
-#                 "-e",
 #                 "tmux",
-#                 "attach",
+#                 "list-panes",
+#                 "-a",
+#                 "-F",
+#                 "#{session_name}|#{window_index}|#{window_name}|#{pane_index}|#{pane_id}|#{pane_current_command}|#{pane_active}",
+#             ],
+#             stdout=subprocess.PIPE,
+#             stderr=subprocess.PIPE,
+#             text=True,
+#         )
+# 
+#         if result.returncode != 0:
+#             return []
+# 
+#         targets = []
+# 
+#         for line in result.stdout.splitlines():
+#             parts = line.split("|")
+# 
+#             if len(parts) != 7:
+#                 continue
+# 
+#             session, win_idx, win_name, pane_idx, pane_id, command, active = parts
+# 
+#             target = f"{session}:{win_idx}.{pane_idx}"
+# 
+#             targets.append(
+#                 {
+#                     "session": session,
+#                     "window_index": win_idx,
+#                     "window_name": win_name,
+#                     "pane_index": pane_idx,
+#                     "pane_id": pane_id,
+#                     "command": command,
+#                     "active": active == "1",
+#                     "target": target,
+#                 }
+#             )
+# 
+#         return targets
+# 
+#     def target(self) -> str:
+#         pane = self.get_pane().strip()
+#         if pane:
+#             return pane
+#         return self.get_session()
+# 
+#     def ensure_session(self) -> None:
+#         if shutil.which("tmux") is None:
+#             raise TermForgeError(
+#                 "tmux is not installed. Install it with:\n\n"
+#                 "sudo apt install tmux"
+#             )
+# 
+#         session = self.get_session()
+# 
+#         result = subprocess.run(
+#             ["tmux", "has-session", "-t", session],
+#             stdout=subprocess.PIPE,
+#             stderr=subprocess.PIPE,
+#             text=True,
+#         )
+# 
+#         if result.returncode != 0:
+#             subprocess.run(
+#                 ["tmux", "new-session", "-d", "-s", session],
+#                 check=True,
+#             )
+# 
+#     def attach_to_selected_window(self):
+#         self.ensure_session()
+# 
+#         window_id = self.app.get_selected_window_id()
+# 
+#         if not window_id:
+#             raise TermForgeError(
+#                 "No terminal window selected for tmux attach."
+#             )
+# 
+#         command = f"tmux attach -t {shlex.quote(self.get_session())}"
+# 
+#         # Reuse TermForge's existing X11 send path.
+#         self.app.send_to_selected_window(
+#             command,
+#             record_history=False,
+#         )
+# 
+#         self.app.set_status(
+#             f"Attached tmux session in selected window: {window_id}"
+#         )
+# 
+#     def select_target(self):
+#         self.ensure_session()
+# 
+#         session = self.get_session()
+# 
+#         result = subprocess.run(
+#             [
+#                 "tmux",
+#                 "display-message",
+#                 "-p",
 #                 "-t",
 #                 session,
-#             ]
+#                 "#{session_name}:#{window_index}.#{pane_index}",
+#             ],
+#             stdout=subprocess.PIPE,
+#             stderr=subprocess.PIPE,
+#             text=True,
 #         )
-
-# normal terminal
-
-#         subprocess.Popen(
-#             [
-#                 terminal,
-#                 "--",
+# 
+#         if result.returncode != 0:
+#             raise TermForgeError(
+#                 "Could not detect tmux target:\n\n"
+#                 f"{result.stderr}"
+#             )
+# 
+#         target = result.stdout.strip()
+# 
+#         setattr(self.app.cfg, "TmuxPane", target)
+# 
+#         self.app.persist_full_config()
+# 
+#         self.app.set_status(
+#             f"Selected tmux target: {target}"
+#         )
+# 
+#     def send_text(self, text: str, record_history: bool = True):
+#         self.ensure_session()
+# 
+#         target = self.target()
+# 
+#         result = subprocess.run(
+#             ["tmux", "send-keys", "-l", "-t", target, text],
+#             stdout=subprocess.PIPE,
+#             stderr=subprocess.PIPE,
+#             text=True,
+#         )
+# 
+#         if result.returncode != 0:
+#             raise TermForgeError(
+#                 "tmux send-keys text failed:\n\n"
+#                 f"target: {target}\n"
+#                 f"command: {text}\n\n"
+#                 f"stdout:\n{result.stdout}\n\n"
+#                 f"stderr:\n{result.stderr}"
+#             )
+# 
+#         result = subprocess.run(
+#             ["tmux", "send-keys", "-t", target, "C-m"],
+#             stdout=subprocess.PIPE,
+#             stderr=subprocess.PIPE,
+#             text=True,
+#         )
+# 
+#         if result.returncode != 0:
+#             raise TermForgeError(
+#                 "tmux send-keys Enter failed:\n\n"
+#                 f"target: {target}\n\n"
+#                 f"stdout:\n{result.stdout}\n\n"
+#                 f"stderr:\n{result.stderr}"
+#             )
+# 
+#         self.app.set_status(f"Sent command to tmux pane: {target}")
+# 
+#         if record_history:
+#             self.app.add_history_entry(
 #                 "tmux",
-#                 "attach",
+#                 text,
+#                 source="backend",
+#             )
+# 
+#     def run_job_window(self, command: str, record_history: bool = True):
+#         self.ensure_session()
+# 
+#         session = self.get_session()
+# 
+#         result = subprocess.run(
+#             [
+#                 "tmux",
+#                 "new-window",
 #                 "-t",
-#                 session,
-#             ]
+#                 f"{session}:",
+#                 "-n",
+#                 "termforge-job",
+#                 "bash",
+#                 "-lc",
+#                 f"{command}; echo; echo '[TermForge job complete]'; exec bash",
+#             ],
+#             stdout=subprocess.PIPE,
+#             stderr=subprocess.PIPE,
+#             text=True,
 #         )
-
-        self.app.set_status(f"Attached tmux session: {session}")
-
-    def capture_output(self, lines: int = 200) -> str:
-        self.ensure_session()
-
-        target = self.target()
-
-        result = subprocess.run(
-            [
-                "tmux",
-                "capture-pane",
-                "-t",
-                target,
-                "-p",
-                "-S",
-                f"-{int(lines)}",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        if result.returncode != 0:
-            raise TermForgeError(
-                "tmux capture-pane failed:\n\n"
-                f"{result.stderr}"
-            )
-
-        return result.stdout
-
-    def get_mode(self) -> str:
-        return str(getattr(self.app.cfg, "TmuxMode", "pane") or "pane").lower()
+# 
+#         if result.returncode != 0:
+#             raise TermForgeError(
+#                 "tmux new-window failed:\n\n"
+#                 f"stdout:\n{result.stdout}\n\n"
+#                 f"stderr:\n{result.stderr}"
+#             )
+# 
+#         self.app.set_status(f"Started tmux job in session: {session}")
+# 
+#         if record_history:
+#             self.app.add_history_entry(
+#                 "tmux",
+#                 command,
+#                 source="backend",
+#             )
+# 
+#     def run_detached(self, command: str, record_history: bool = True):
+#         mode = self.get_mode()
+# 
+#         if mode == "job":
+#             return self.run_job_window(
+#                 command,
+#                 record_history=record_history,
+#             )
+# 
+#         return self.send_text(
+#             command,
+#             record_history=record_history,
+#         )
+# 
+#     def attach(self):
+#         self.ensure_session()
+# 
+#         session = self.get_session()
+# 
+#         terminal = getattr(self.app.cfg, "terminal", {}).get(
+#             "application",
+#             "gnome-terminal",
+#         )
+# 
+# # tilix
+# 
+# #         subprocess.Popen(
+# #             [
+# #                 "tilix",
+# #                 "-e",
+# #                 "tmux",
+# #                 "attach",
+# #                 "-t",
+# #                 session,
+# #             ]
+# #         )
+# 
+# # normal terminal
+# 
+# #         subprocess.Popen(
+# #             [
+# #                 terminal,
+# #                 "--",
+# #                 "tmux",
+# #                 "attach",
+# #                 "-t",
+# #                 session,
+# #             ]
+# #         )
+# 
+#         self.app.set_status(f"Attached tmux session: {session}")
+# 
+#     def capture_output(self, lines: int = 200) -> str:
+#         self.ensure_session()
+# 
+#         target = self.target()
+# 
+#         result = subprocess.run(
+#             [
+#                 "tmux",
+#                 "capture-pane",
+#                 "-t",
+#                 target,
+#                 "-p",
+#                 "-S",
+#                 f"-{int(lines)}",
+#             ],
+#             stdout=subprocess.PIPE,
+#             stderr=subprocess.PIPE,
+#             text=True,
+#         )
+# 
+#         if result.returncode != 0:
+#             raise TermForgeError(
+#                 "tmux capture-pane failed:\n\n"
+#                 f"{result.stderr}"
+#             )
+# 
+#         return result.stdout
+# 
+#     def get_mode(self) -> str:
+#         return str(getattr(self.app.cfg, "TmuxMode", "pane") or "pane").lower()
 
 class TmuxTargetPickerWindow:
     def __init__(self, app, manager=None):
@@ -7065,6 +7093,7 @@ class WorkflowLiveMonitorWindow:
         self.window.geometry("980x620")
         self.window.transient(app.root)
 
+        self.auto_refresh_enabled = True
         outer = Frame(self.window, padx=8, pady=8)
         outer.pack(fill=BOTH, expand=True)
 
@@ -7080,6 +7109,15 @@ class WorkflowLiveMonitorWindow:
 
         action_row = Frame(outer)
         action_row.pack(fill=X, pady=(0, 8))
+
+        Button(
+            action_row,
+            text="Pause Auto",
+            width=14,
+            bg="#7f6000",
+            fg="white",
+            command=self.toggle_auto_refresh,
+        ).pack(side=LEFT, padx=(0, 6))
 
         Button(
             action_row,
@@ -7156,6 +7194,7 @@ class WorkflowLiveMonitorWindow:
         steps = state.get("steps", {})
         output_vars = state.get("output_vars", {})
         total = state.get("total", 0)
+        output_vars = state.get("output_vars", {})
 
         success = sum(1 for s in steps.values() if s.get("status") == "success")
         failed = sum(1 for s in steps.values() if s.get("status") == "failed")
@@ -7174,6 +7213,19 @@ class WorkflowLiveMonitorWindow:
             f"Workflow Output Variables:\n"
             f"{pprint.pformat(output_vars, indent=4)}"
         )
+
+#         self.summary.insert(
+#             "1.0",
+#             f"Workflow: {state.get('name')}\n"
+#             f"Mode: {state.get('mode')}\n"
+#             f"Status: {state.get('status')}\n"
+#             f"Started: {state.get('started_at')}\n"
+#             f"Finished: {state.get('finished_at') or '(running)'}\n"
+#             f"Progress: success={success}, failed={failed}, "
+#             f"skipped={skipped}, running={running}, total={total}\n\n"
+#             f"Workflow Output Variables:\n"
+#             f"{pprint.pformat(output_vars, indent=4)}"
+#         )
 
         self.snapshot = list(steps.values())
 
@@ -7201,6 +7253,8 @@ class WorkflowLiveMonitorWindow:
 
         self.show_step_details(selected_index)
 
+    def toggle_auto_refresh(self):
+        self.auto_refresh_enabled = not self.auto_refresh_enabled
 
     def show_step_details(self, index):
         if index < 0 or index >= len(self.snapshot):
@@ -7244,7 +7298,9 @@ class WorkflowLiveMonitorWindow:
     def auto_refresh(self):
         try:
             if self.window.winfo_exists():
-                self.refresh()
+                if self.auto_refresh_enabled:
+                    self.refresh()
+
                 self.window.after(1000, self.auto_refresh)
         except Exception:
             pass
@@ -7454,6 +7510,202 @@ class WorkflowHistoryViewerWindow:
 
         except Exception:
             pass
+
+class SharedVariableManagerWindow:
+    def __init__(self, app):
+        self.app = app
+
+        self.window = Toplevel(app.root)
+        self.window.title("Shared Variable Manager")
+        self.window.geometry("900x560")
+        self.window.transient(app.root)
+
+        outer = Frame(self.window, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Shared Variable Manager",
+            bd=4,
+            width=38,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        action_row = Frame(outer)
+        action_row.pack(fill=X, pady=(0, 8))
+
+        Button(
+            action_row,
+            text="Save",
+            width=14,
+            bg="darkgreen",
+            fg="white",
+            command=self.save_variable,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Delete",
+            width=14,
+            bg="#7f6000",
+            fg="white",
+            command=self.delete_variable,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Refresh",
+            width=14,
+            bg="navy",
+            fg="white",
+            command=self.refresh,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Close",
+            width=14,
+            bg="red",
+            fg="black",
+            command=self.window.destroy,
+        ).pack(side=RIGHT)
+
+        body = Frame(outer)
+        body.pack(fill=BOTH, expand=True)
+
+        left = Frame(body)
+        left.pack(side=LEFT, fill=BOTH, expand=True)
+
+        right = Frame(body)
+        right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
+
+        self.listbox = Listbox(
+            left,
+            width=38,
+            height=24,
+            exportselection=False,
+        )
+        self.listbox.pack(side=LEFT, fill=BOTH, expand=True)
+
+        scrollbar = Scrollbar(left, command=self.listbox.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self.listbox.config(yscrollcommand=scrollbar.set)
+
+        form = Frame(right)
+        form.pack(fill=X)
+
+        Label(form, text="Name:", width=12, anchor="w").grid(row=0, column=0, sticky="w", pady=3)
+        self.name_var = StringVar()
+        Entry(form, textvariable=self.name_var, width=48).grid(row=0, column=1, sticky="ew", pady=3)
+
+        Label(form, text="Value:", width=12, anchor="nw").grid(row=1, column=0, sticky="nw", pady=3)
+        self.value_text = Text(form, height=8, width=58, wrap="word")
+        self.value_text.grid(row=1, column=1, sticky="nsew", pady=3)
+
+        form.columnconfigure(1, weight=1)
+
+        self.info = Text(right, wrap="word", height=12)
+        self.info.pack(fill=BOTH, expand=True, pady=(10, 0))
+
+        self.snapshot = []
+        self.listbox.bind("<<ListboxSelect>>", self.on_select)
+
+        self.refresh()
+
+    def refresh(self):
+        variables = self.app.get_shared_variables()
+
+        self.snapshot = []
+        self.listbox.delete(0, END)
+
+        for name in sorted(variables.keys()):
+            value = str(variables.get(name, ""))
+            self.snapshot.append((name, value))
+            self.listbox.insert(END, f"${{{name}}} = {value[:60]}")
+
+        self.info.delete("1.0", END)
+        self.info.insert(
+            "1.0",
+            "Shared variables are persistent and reusable in commands.\n\n"
+            "Use syntax:\n"
+            "  ${name}\n\n"
+            "Example:\n"
+            "  project_dir = /home/mora/termforge\n\n"
+            "Command:\n"
+            "  cd ${project_dir} && pwd\n"
+        )
+
+    def selected_item(self):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return None
+
+        index = idxs[0]
+
+        if index < 0 or index >= len(self.snapshot):
+            return None
+
+        return self.snapshot[index]
+
+    def on_select(self, _event=None):
+        item = self.selected_item()
+
+        if item is None:
+            return
+
+        name, value = item
+
+        self.name_var.set(name)
+        self.value_text.delete("1.0", END)
+        self.value_text.insert("1.0", value)
+
+    def save_variable(self):
+        name = self.name_var.get().strip()
+        value = self.value_text.get("1.0", END).strip()
+
+        if not name:
+            messagebox.showerror(
+                "Shared Variable Manager",
+                "Variable name is required.",
+            )
+            return
+
+        try:
+            self.app.set_shared_variable(name, value)
+        except Exception as exc:
+            self.app.show_traceback_window(
+                "Save Shared Variable Failed",
+                exc,
+            )
+            return
+
+        self.app.set_status(f"Saved shared variable: {name}")
+        self.refresh()
+
+    def delete_variable(self):
+        item = self.selected_item()
+
+        if item is None:
+            messagebox.showerror(
+                "Shared Variable Manager",
+                "Select a variable first.",
+            )
+            return
+
+        name, _value = item
+
+        if not messagebox.askokcancel(
+            "Delete Shared Variable",
+            f"Delete shared variable '{name}'?",
+        ):
+            return
+
+        self.app.delete_shared_variable(name)
+        self.name_var.set("")
+        self.value_text.delete("1.0", END)
+        self.refresh()
 
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
@@ -7695,6 +7947,71 @@ class TermForgeApp:
         finally:
             self.root.destroy()
 
+    def open_shared_variable_manager(self):
+        SharedVariableManagerWindow(self)
+
+    def get_shared_variables(self) -> dict:
+        variables = getattr(self.cfg, "SharedVariables", None)
+
+        if variables is None or not isinstance(variables, dict):
+            variables = {}
+            setattr(self.cfg, "SharedVariables", variables)
+
+        return variables
+
+
+    def set_shared_variable(self, name: str, value: str) -> None:
+        name = str(name).strip()
+
+        if not name:
+            raise TermForgeError("Shared variable name is required.")
+
+        variables = self.get_shared_variables()
+        variables[name] = str(value)
+
+        setattr(self.cfg, "SharedVariables", variables)
+        self.persist_full_config()
+
+
+    def delete_shared_variable(self, name: str) -> None:
+        variables = self.get_shared_variables()
+        variables.pop(name, None)
+
+        setattr(self.cfg, "SharedVariables", variables)
+        self.persist_full_config()
+
+
+    def resolve_shared_variables_in_text(self, text: str) -> str:
+        if not isinstance(text, str):
+            return text
+
+        variables = self.get_shared_variables()
+
+        def replace_var(match):
+            key = match.group(1)
+            return str(variables.get(key, match.group(0)))
+
+        return re.sub(
+            r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}",
+            replace_var,
+            text,
+        )
+
+    def clean_captured_output(self, text: str) -> str:
+        if not isinstance(text, str):
+            return ""
+
+        text = text.replace("\x00", "")
+        text = text.replace("\\N", "")
+
+        lines = []
+        for line in text.splitlines():
+            line = line.rstrip()
+            if line:
+                lines.append(line)
+
+        return "\n".join(lines)
+
     def extract_termforge_capture(self, output: str) -> str:
         if not output:
             return ""
@@ -7703,14 +8020,10 @@ class TermForgeApp:
         end = "__TF_CAPTURE_END__"
 
         if start in output and end in output:
-            chunk = output.split(start, 1)[1].split(end, 1)[0]
+            before_end = output.rsplit(end, 1)[0]
+            chunk = before_end.rsplit(start, 1)[-1]
         else:
             chunk = output
-
-        ignored_prefixes = (
-            "[",
-            "(wd ",
-        )
 
         lines = []
 
@@ -7720,15 +8033,29 @@ class TermForgeApp:
             if not line:
                 continue
 
-            if line.startswith(ignored_prefixes):
+            # Ignore echoed commands
+            if start in line or end in line:
                 continue
 
-            if line.startswith("$") or line.endswith("$"):
+            # Ignore shell prompts like:
+            # mora@spectrix:~(12:26:25)$
+            if re.search(r"^[^@\s]+@[^:\s]+:.*\([0-9:]+\)\$", line):
+                continue
+
+            # Ignore job-control messages
+            if line.startswith("["):
+                continue
+
+            if line.startswith("(wd "):
+                continue
+
+            # Ignore bash errors/prompts
+            if "syntax error near unexpected token" in line:
                 continue
 
             lines.append(line)
 
-        return "\n".join(lines).strip()
+        return lines[-1] if lines else ""
 
     def get_workflow_output_vars(self) -> dict:
         if not self.current_workflow_state:
@@ -7818,7 +8145,9 @@ class TermForgeApp:
             backend = getattr(self, "backend", None)
 
             if isinstance(backend, TmuxBackend):
-                return backend.capture_output(lines=lines)
+                return self.clean_captured_output(
+                    backend.capture_output(lines=lines)
+                )
 
             return ""
         except Exception as exc:
@@ -8085,6 +8414,13 @@ class TermForgeApp:
             if capture_variable:
                 captured_value = after_output.strip().splitlines()[-1] if after_output.strip() else ""
                 self.set_workflow_output_var(capture_variable, captured_value)
+
+                self.log(
+                    f"Workflow captured variable: "
+                    f"{capture_variable}={captured_value!r}"
+                )
+
+            after_output = self.capture_backend_output(lines=120)
 
             return step_id, True, "", after_output
 
@@ -10465,6 +10801,10 @@ class TermForgeApp:
                     self.get_current_environment(),
                 )
 
+                resolved_cmd = self.resolve_shared_variables_in_text(
+                    resolved_cmd
+                )
+
             if isinstance(resolved_cmd, str) and self.is_dangerous_command(resolved_cmd):
                 if not options.get("confirm", False):
                     if not self.confirm_dangerous_command(resolved_cmd):
@@ -11061,6 +11401,7 @@ class TermForgeApp:
             tmux_session = getattr(self.cfg, "TmuxSession", "termforge")
             tmux_pane = getattr(self.cfg, "TmuxPane", "")
             tmux_mode = getattr(self.cfg, "TmuxMode", "pane")
+            shared_variables = getattr(self.cfg, "SharedVariables", {})
 
             lines = [
                 "# TermForge user configuration",
@@ -11086,6 +11427,7 @@ class TermForgeApp:
                 f"Workflows = {pprint.pformat(workflows, indent=4)}",
                 f"Backend = {repr(backend)}",
                 f"TmuxMode = {repr(tmux_mode)}",
+                f"SharedVariables = {pprint.pformat(shared_variables, indent=4)}",
                 "",
             ]
             CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
@@ -11217,6 +11559,8 @@ class TermForgeApp:
         tools_menu.add_separator()
         tools_menu.add_command(label="Reload Plugins", command=self.reload_plugins_with_notice)
         tools_menu.add_command(label="Open Plugin Folder", command=self.open_plugin_folder)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Shared Variable Manager", command=self.open_shared_variable_manager,)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         automation_menu = Menu(menubar, tearoff=0)
