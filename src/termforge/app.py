@@ -1792,6 +1792,11 @@ class CommandEditorWindow:
 
     def clear_form(self):
         try:
+            self.backend_var.set("")
+            self.tmux_session_var.set(str(getattr(self.app.cfg, "TmuxSession", "termforge")))
+            self.tmux_pane_var.set(str(getattr(self.app.cfg, "TmuxPane", "")))
+            self.tmux_mode_var.set(str(getattr(self.app.cfg, "TmuxMode", "pane")))
+
             if hasattr(self, "category_choices") and self.category_choices:
                 self.category_var.set(self.category_choices[0])
             else:
@@ -1985,6 +1990,8 @@ class CategoryEditorWindow:
 
     def refresh(self):
         self.listbox.delete(0, END)
+        backend = schedule.get("backend", "")
+        backend_text = f" backend:{backend}" if backend else ""
         categories = self.get_categories()
         self.snapshot = []
         for name in sorted(categories.keys()):
@@ -2630,8 +2637,9 @@ class ScheduleManagerWindow:
         self.app = app
         self.window = Toplevel(app.root)
         self.window.title("Schedule Manager")
-        self.window.geometry("980x560")
+        self.window.geometry("1120x760")
         self.window.transient(app.root)
+
 
         outer = Frame(self.window, padx=8, pady=8)
         outer.pack(fill=BOTH, expand=True)
@@ -2676,28 +2684,22 @@ class ScheduleManagerWindow:
         form.pack(fill=X)
 
         self.name_var = StringVar()
+        self.target_type_var = StringVar(value="command")
         self.category_var = StringVar()
         self.command_var = StringVar()
-        self.target_type_var = StringVar(value="command")
-        self.target_type_var.trace_add("write", self.update_target_type_ui)
         self.workflow_var = StringVar()
+        self.profile_var = StringVar()
+        self.priority_var = StringVar(value="normal")
+
+        self.backend_var = StringVar(value="")
+        self.tmux_session_var = StringVar(value=str(getattr(self.app.cfg, "TmuxSession", "termforge")))
+        self.tmux_pane_var = StringVar(value=str(getattr(self.app.cfg, "TmuxPane", "")))
+        self.tmux_mode_var = StringVar(value=str(getattr(self.app.cfg, "TmuxMode", "pane")))
+
         self.type_var = StringVar(value="interval_minutes")
         self.time_var = StringVar()
         self.minutes_var = StringVar(value="1")
         self.enabled_var = IntVar(value=1)
-        self.profile_var = StringVar()
-        self.priority_var = StringVar(value="normal")
-
-        Label(form, text="Priority:", width=16, anchor="w").grid(row=4, column=0, sticky="w", pady=3)
-
-        self.priority_menu = OptionMenu(
-            form,
-            self.priority_var,
-            "critical",
-            "high",
-            "normal",
-            "low",
-        )
 
         Label(form, text="Target Type:", width=16, anchor="w").grid(row=0, column=0, sticky="w", pady=3)
         self.target_type_menu = OptionMenu(form, self.target_type_var, "command", "workflow")
@@ -2727,21 +2729,39 @@ class ScheduleManagerWindow:
         self.profile_menu.config(width=38)
         self.profile_menu.grid(row=5, column=1, sticky="w", pady=3)
 
+        Label(form, text="Priority:", width=16, anchor="w").grid(row=6, column=0, sticky="w", pady=3)
+        self.priority_menu = OptionMenu(form, self.priority_var, "critical", "high", "normal", "low")
         self.priority_menu.config(width=38)
         self.priority_menu.grid(row=6, column=1, sticky="w", pady=3)
 
-        Label(form, text="Type:", width=16, anchor="w").grid(row=7, column=0, sticky="w", pady=3)
+        Label(form, text="Backend:", width=16, anchor="w").grid(row=7, column=0, sticky="w", pady=3)
+        self.backend_menu = OptionMenu(form, self.backend_var, "", "x11", "subprocess", "tmux")
+        self.backend_menu.config(width=38)
+        self.backend_menu.grid(row=7, column=1, sticky="w", pady=3)
+
+        Label(form, text="Tmux Session:", width=16, anchor="w").grid(row=8, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.tmux_session_var, width=42).grid(row=8, column=1, sticky="ew", pady=3)
+
+        Label(form, text="Tmux Pane:", width=16, anchor="w").grid(row=9, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.tmux_pane_var, width=42).grid(row=9, column=1, sticky="ew", pady=3)
+
+        Label(form, text="Tmux Mode:", width=16, anchor="w").grid(row=10, column=0, sticky="w", pady=3)
+        self.tmux_mode_menu = OptionMenu(form, self.tmux_mode_var, "pane", "job")
+        self.tmux_mode_menu.config(width=38)
+        self.tmux_mode_menu.grid(row=10, column=1, sticky="w", pady=3)
+
+        Label(form, text="Type:", width=16, anchor="w").grid(row=11, column=0, sticky="w", pady=3)
         self.type_menu = OptionMenu(form, self.type_var, "startup", "daily", "interval_minutes")
         self.type_menu.config(width=38)
-        self.type_menu.grid(row=7, column=1, sticky="w", pady=3)
+        self.type_menu.grid(row=11, column=1, sticky="w", pady=3)
 
-        Label(form, text="Daily Time HH:MM:", width=16, anchor="w").grid(row=8, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.time_var, width=42).grid(row=8, column=1, sticky="ew", pady=3)
+        Label(form, text="Daily Time HH:MM:", width=16, anchor="w").grid(row=12, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.time_var, width=42).grid(row=12, column=1, sticky="ew", pady=3)
 
-        Label(form, text="Interval Minutes:", width=16, anchor="w").grid(row=9, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.minutes_var, width=42).grid(row=9, column=1, sticky="ew", pady=3)
+        Label(form, text="Interval Minutes:", width=16, anchor="w").grid(row=13, column=0, sticky="w", pady=3)
+        Entry(form, textvariable=self.minutes_var, width=42).grid(row=13, column=1, sticky="ew", pady=3)
 
-        Checkbutton(form, text="Enabled", variable=self.enabled_var).grid(row=10, column=1, sticky="w", pady=3)
+        Checkbutton(form, text="Enabled", variable=self.enabled_var).grid(row=14, column=1, sticky="w", pady=3)
 
         self.info = Text(right, wrap="word", height=10)
         self.info.pack(fill=BOTH, expand=True, pady=(12, 0))
@@ -2833,38 +2853,66 @@ class ScheduleManagerWindow:
             self.command_var.set("")
 
     def refresh(self):
-        self.listbox.delete(0, END)
-        self.snapshot = []
+        schedules = self.get_schedules()
 
-        for idx, schedule in enumerate(self.get_schedules()):
-            name = schedule.get("name", f"Schedule {idx + 1}")
+        self.snapshot = []
+        self.listbox.delete(0, END)
+
+        for index, schedule in enumerate(schedules, start=1):
+            if not isinstance(schedule, dict):
+                continue
+
+            self.snapshot.append(schedule)
+
+            enabled = "ON" if schedule.get("enabled", True) else "OFF"
+            name = schedule.get("name", f"Schedule {index}")
+            schedule_type = schedule.get("type", "")
+            target_type = schedule.get("target_type", "command")
+
             category = schedule.get("category", "")
             command = schedule.get("command", "")
+            workflow = schedule.get("workflow", "")
+
+            if target_type == "workflow":
+                target_text = f"workflow/{workflow}"
+            else:
+                target_text = f"{category}/{command}"
+
             profile = schedule.get("profile", "")
             profile_text = f" profile:{profile}" if profile else ""
+
             priority = schedule.get("priority", "normal")
-            schedule_type = schedule.get("type", "")
-            enabled = "ON" if schedule.get("enabled") else "OFF"
 
-            last_status = schedule.get("_last_status", "never")
+            backend = schedule.get("backend", "")
+            backend_text = f" backend:{backend}" if backend else ""
+
+            run_count = int(schedule.get("_run_count", 0) or 0)
+            last_status = schedule.get("_last_status", "")
             last_run = schedule.get("_last_run", "")
-            run_count = schedule.get("_run_count", 0)
 
-            status_text = last_status
+            status_parts = []
+            if last_status:
+                status_parts.append(f"status:{last_status}")
             if last_run:
-                status_text = f"{last_status} @ {last_run}"
+                status_parts.append(f"last:{last_run}")
+
+            status_text = " ".join(status_parts) if status_parts else "never run"
 
             label = (
                 f"[{enabled}] {name} — {schedule_type} — "
-                f"{category}/{command}{profile_text} — priority:{priority} — "
-                f"{status_text} — runs:{run_count}"
+                f"{target_text}{profile_text}{backend_text} — "
+                f"priority:{priority} — {status_text} — runs:{run_count}"
             )
 
-            self.snapshot.append((idx, schedule))
             self.listbox.insert(END, label)
 
         self.info.delete("1.0", END)
-        self.info.insert("1.0", "Select a schedule or create a new one.")
+        self.info.insert(
+            "1.0",
+            f"Schedules: {len(self.snapshot)}\n\n"
+            "Select a schedule to edit it.\n"
+            "Backend blank means use global backend."
+        )
 
     def on_select(self, _event=None):
         idxs = self.listbox.curselection()
@@ -2875,7 +2923,7 @@ class ScheduleManagerWindow:
         if index < 0 or index >= len(self.snapshot):
             return
 
-        _schedule_index, schedule = self.snapshot[index]
+        schedule = self.snapshot[index]
 
         self.name_var.set(schedule.get("name", ""))
 
@@ -2917,6 +2965,10 @@ class ScheduleManagerWindow:
         if priority not in PRIORITY_ORDER:
             priority = "normal"
         schedule_type = self.type_var.get().strip()
+        backend = self.backend_var.get().strip()
+        tmux_session = self.tmux_session_var.get().strip()
+        tmux_pane = self.tmux_pane_var.get().strip()
+        tmux_mode = self.tmux_mode_var.get().strip() or "pane"
 
         if not name:
             raise ValueError("Schedule name is required.")
@@ -2935,6 +2987,10 @@ class ScheduleManagerWindow:
             "priority": priority,
             "type": schedule_type,
             "enabled": bool(self.enabled_var.get()),
+            "backend": backend,
+            "tmux_session": tmux_session,
+            "tmux_pane": tmux_pane,
+            "tmux_mode": tmux_mode,
         }
 
         if target_type == "workflow":
@@ -2982,7 +3038,13 @@ class ScheduleManagerWindow:
         idxs = self.listbox.curselection()
         if not idxs:
             return None
-        return self.snapshot[idxs[0]][0]
+
+        index = idxs[0]
+
+        if index < 0 or index >= len(self.snapshot):
+            return None
+
+        return index
 
     def save_schedule(self):
         try:
@@ -3163,6 +3225,16 @@ class ScheduleHistoryWindow:
 
         self.target_type_var.set(schedule.get("target_type", "command"))
         self.workflow_var.set(schedule.get("workflow", ""))
+        self.backend_var.set(schedule.get("backend", ""))
+        self.tmux_session_var.set(
+            schedule.get("tmux_session", getattr(self.app.cfg, "TmuxSession", "termforge"))
+        )
+        self.tmux_pane_var.set(
+            schedule.get("tmux_pane", getattr(self.app.cfg, "TmuxPane", ""))
+        )
+        self.tmux_mode_var.set(
+            schedule.get("tmux_mode", getattr(self.app.cfg, "TmuxMode", "pane"))
+        )
 
         index = idxs[0]
         if index < 0 or index >= len(self.snapshot):
