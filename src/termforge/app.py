@@ -6882,7 +6882,33 @@ class TmuxBackend:
 
         self.app.set_status(f"Attached tmux session: {session}")
 
+    def capture_output(self, lines: int = 200) -> str:
+        self.ensure_session()
 
+        target = self.target()
+
+        result = subprocess.run(
+            [
+                "tmux",
+                "capture-pane",
+                "-t",
+                target,
+                "-p",
+                "-S",
+                f"-{int(lines)}",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            raise TermForgeError(
+                "tmux capture-pane failed:\n\n"
+                f"{result.stderr}"
+            )
+
+        return result.stdout
 
     def get_mode(self) -> str:
         return str(getattr(self.app.cfg, "TmuxMode", "pane") or "pane").lower()
@@ -7128,6 +7154,7 @@ class WorkflowLiveMonitorWindow:
             return
 
         steps = state.get("steps", {})
+        output_vars = state.get("output_vars", {})
         total = state.get("total", 0)
 
         success = sum(1 for s in steps.values() if s.get("status") == "success")
@@ -7143,7 +7170,9 @@ class WorkflowLiveMonitorWindow:
             f"Started: {state.get('started_at')}\n"
             f"Finished: {state.get('finished_at') or '(running)'}\n"
             f"Progress: success={success}, failed={failed}, "
-            f"skipped={skipped}, running={running}, total={total}",
+            f"skipped={skipped}, running={running}, total={total}\n\n"
+            f"Workflow Output Variables:\n"
+            f"{pprint.pformat(output_vars, indent=4)}"
         )
 
         self.snapshot = list(steps.values())
@@ -7666,6 +7695,74 @@ class TermForgeApp:
         finally:
             self.root.destroy()
 
+    def extract_termforge_capture(self, output: str) -> str:
+        if not output:
+            return ""
+
+        start = "__TF_CAPTURE_START__"
+        end = "__TF_CAPTURE_END__"
+
+        if start in output and end in output:
+            chunk = output.split(start, 1)[1].split(end, 1)[0]
+        else:
+            chunk = output
+
+        ignored_prefixes = (
+            "[",
+            "(wd ",
+        )
+
+        lines = []
+
+        for line in chunk.splitlines():
+            line = line.strip()
+
+            if not line:
+                continue
+
+            if line.startswith(ignored_prefixes):
+                continue
+
+            if line.startswith("$") or line.endswith("$"):
+                continue
+
+            lines.append(line)
+
+        return "\n".join(lines).strip()
+
+    def get_workflow_output_vars(self) -> dict:
+        if not self.current_workflow_state:
+            return {}
+
+        return self.current_workflow_state.setdefault("output_vars", {})
+
+
+    def set_workflow_output_var(self, name: str, value: str) -> None:
+        name = str(name).strip()
+
+        if not name:
+            return
+
+        output_vars = self.get_workflow_output_vars()
+        output_vars[name] = value
+
+
+    def resolve_workflow_output_vars(self, text: str) -> str:
+        if not isinstance(text, str):
+            return text
+
+        output_vars = self.get_workflow_output_vars()
+
+        def replace_var(match):
+            key = match.group(1)
+            return str(output_vars.get(key, match.group(0)))
+
+        return re.sub(
+            r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}",
+            replace_var,
+            text,
+        )
+
     def snapshot_backend_context(self) -> dict:
         return {
             "backend": getattr(self.cfg, "Backend", "x11"),
@@ -7742,8 +7839,8 @@ class TermForgeApp:
             "finished_at": "",
             "status": "running",
             "steps": {},
+            "output_vars": {},
         }
-
 
     def update_workflow_step_state(
         self,
@@ -7944,6 +8041,7 @@ class TermForgeApp:
             environment = step.get("environment", "")
             profile = step.get("profile", "")
             command = step.get("command")
+            capture_variable = str(step.get("capture_variable", "")).strip()
 
             if environment:
                 self.set_current_environment(str(environment))
@@ -7952,16 +8050,22 @@ class TermForgeApp:
                 self.select_window_profile(str(profile))
 
             if isinstance(command, str):
-                if "/" not in command:
-                    raise TermForgeError(
-                        f"Workflow command string must be Category/Command: {command}"
-                    )
+                command = self.resolve_workflow_output_vars(command)
+
+                if isinstance(command, str):
+                    if "/" not in command:
+                        raise TermForgeError(
+                            f"Workflow command string must be Category/Command: {command}"
+                        )
 
                 category, cmd_name = command.split("/", 1)
                 self.select_cmd(None, category, cmd_name)
 
             elif isinstance(command, (list, tuple)):
                 cmd_type, cmd_text, options = parse_command_entry(command)
+
+                if isinstance(cmd_text, str):
+                    cmd_text = self.resolve_workflow_output_vars(cmd_text)
 
                 self.run_cmd(
                     cmd_type,
@@ -7977,6 +8081,10 @@ class TermForgeApp:
                 )
 
             after_output = self.capture_backend_output(lines=120)
+
+            if capture_variable:
+                captured_value = after_output.strip().splitlines()[-1] if after_output.strip() else ""
+                self.set_workflow_output_var(capture_variable, captured_value)
 
             return step_id, True, "", after_output
 
