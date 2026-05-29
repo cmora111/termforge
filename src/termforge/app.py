@@ -5725,15 +5725,18 @@ class WorkflowVisualizerWindow:
 
             environment = step.get("environment", "")
             profile = step.get("profile", "")
+            backend = step.get("backend", "")
+            tmux_session = step.get("tmux_session", "")
+            tmux_pane = step.get("tmux_pane", "")
+            tmux_mode = step.get("tmux_mode", "")
             command = step.get("command", "")
-
-            lines.append(f"   run_if: {run_if}")
 
             lines.append(f"   id: {step_id}")
             lines.append(
                 "   depends_on: "
                 + (", ".join(map(str, depends_on)) if depends_on else "none")
             )
+            lines.append(f"   run_if: {run_if}")
 
             missing = [
                 dep for dep in depends_on
@@ -5750,6 +5753,12 @@ class WorkflowVisualizerWindow:
 
             lines.append(f"   environment: {environment or '(none)'}")
             lines.append(f"   profile: {profile or '(none)'}")
+            lines.append(f"   backend: {backend or '(global)'}")
+
+            if backend == "tmux":
+                lines.append(f"   tmux_session: {tmux_session or '(global)'}")
+                lines.append(f"   tmux_pane: {tmux_pane or '(global)'}")
+                lines.append(f"   tmux_mode: {tmux_mode or '(global)'}")
 
             if isinstance(command, str):
                 lines.append(f"   command_ref: {command}")
@@ -7025,17 +7034,25 @@ class WorkflowLiveMonitorWindow:
         return getattr(self.app, "current_workflow_state", None)
 
     def refresh(self):
+        selected_index = None
+
+        try:
+            idxs = self.listbox.curselection()
+            if idxs:
+                selected_index = idxs[0]
+        except Exception:
+            pass
+
         state = self.get_state()
 
         self.summary.delete("1.0", END)
         self.listbox.delete(0, END)
 
         if not state:
-            self.summary.insert(
-                "1.0",
-                "No workflow is currently running.",
-            )
+            self.summary.insert("1.0", "No workflow is currently running.")
             self.snapshot = []
+            self.details.delete("1.0", END)
+            self.details.insert("1.0", "No workflow step selected.")
             return
 
         steps = state.get("steps", {})
@@ -7069,21 +7086,47 @@ class WorkflowLiveMonitorWindow:
                 f"{step.get('message', '')}",
             )
 
+        if not self.snapshot:
+            self.details.delete("1.0", END)
+            self.details.insert("1.0", "No workflow steps captured yet.")
+            return
+
+        if selected_index is None or selected_index >= len(self.snapshot):
+            selected_index = 0
+
+        self.listbox.selection_clear(0, END)
+        self.listbox.selection_set(selected_index)
+        self.listbox.activate(selected_index)
+
+        self.show_step_details(selected_index)
+
+
+    def show_step_details(self, index):
+        if index < 0 or index >= len(self.snapshot):
+            return
+
+        step = self.snapshot[index]
+
+        output = step.get("output", "")
+
+        text = pprint.pformat(step, indent=4)
+        text += f"\n\nDEBUG selected index: {index}"
+        text += f"\nDEBUG output length: {len(output)}\n"
+
+        if output:
+            text += "\n===== CAPTURED OUTPUT =====\n"
+            text += output
+
+        self.details.delete("1.0", END)
+        self.details.insert("1.0", text)
+
+
     def on_select(self, _event=None):
         idxs = self.listbox.curselection()
         if not idxs:
             return
 
-        index = idxs[0]
-
-        if index < 0 or index >= len(self.snapshot):
-            return
-
-        self.details.delete("1.0", END)
-        self.details.insert(
-            "1.0",
-            pprint.pformat(self.snapshot[index], indent=4),
-        )
+        self.show_step_details(idxs[0])
 
     def copy_report(self):
         state = self.get_state() or {}
@@ -7551,6 +7594,67 @@ class TermForgeApp:
         finally:
             self.root.destroy()
 
+    def snapshot_backend_context(self) -> dict:
+        return {
+            "backend": getattr(self.cfg, "Backend", "x11"),
+            "tmux_session": getattr(self.cfg, "TmuxSession", "termforge"),
+            "tmux_pane": getattr(self.cfg, "TmuxPane", ""),
+            "tmux_mode": getattr(self.cfg, "TmuxMode", "pane"),
+            "current_environment": self.get_current_environment(),
+        }
+
+
+    def restore_backend_context(self, ctx: dict) -> None:
+        setattr(self.cfg, "Backend", ctx.get("backend", "x11"))
+        setattr(self.cfg, "TmuxSession", ctx.get("tmux_session", "termforge"))
+        setattr(self.cfg, "TmuxPane", ctx.get("tmux_pane", ""))
+        setattr(self.cfg, "TmuxMode", ctx.get("tmux_mode", "pane"))
+
+        self.current_environment = ctx.get("current_environment")
+        self.backend = self.create_backend()
+
+
+    def apply_backend_override(self, data: dict) -> None:
+        backend_name = str(data.get("backend", "")).strip().lower()
+
+        if not backend_name:
+            return
+
+        if backend_name not in ("x11", "subprocess", "tmux"):
+            raise TermForgeError(f"Unknown backend override: {backend_name}")
+
+        setattr(self.cfg, "Backend", backend_name)
+
+        if backend_name == "tmux":
+            setattr(
+                self.cfg,
+                "TmuxSession",
+                data.get("tmux_session", getattr(self.cfg, "TmuxSession", "termforge")),
+            )
+            setattr(
+                self.cfg,
+                "TmuxPane",
+                data.get("tmux_pane", getattr(self.cfg, "TmuxPane", "")),
+            )
+            setattr(
+                self.cfg,
+                "TmuxMode",
+                data.get("tmux_mode", getattr(self.cfg, "TmuxMode", "pane")),
+            )
+
+        self.backend = self.create_backend()
+
+    def capture_backend_output(self, lines: int = 120) -> str:
+        try:
+            backend = getattr(self, "backend", None)
+
+            if isinstance(backend, TmuxBackend):
+                return backend.capture_output(lines=lines)
+
+            return ""
+        except Exception as exc:
+            return f"[capture failed: {exc}]"
+
     def open_workflow_history_viewer(self):
         WorkflowHistoryViewerWindow(self)
 
@@ -7574,6 +7678,7 @@ class TermForgeApp:
         step_id: str,
         status: str,
         message: str = "",
+        output: str = "",
     ):
         if not self.current_workflow_state:
             return
@@ -7588,11 +7693,14 @@ class TermForgeApp:
                 "started_at": "",
                 "finished_at": "",
                 "message": "",
+                "output": "",
             },
         )
 
         row["status"] = status
         row["message"] = message
+        if output:
+            row["output"] = output
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -7752,10 +7860,15 @@ class TermForgeApp:
 
         return True
 
-    def run_workflow_step(self, workflow_name: str, step: dict) -> tuple[str, bool, str]:
+    def run_workflow_step(self, workflow_name: str, step: dict) -> tuple[str, bool, str, str]:
         step_id = str(step.get("id", "")).strip()
+        backend_ctx = self.snapshot_backend_context()
 
         try:
+            self.apply_backend_override(step)
+
+            before_output = self.capture_backend_output(lines=80)
+
             environment = step.get("environment", "")
             profile = step.get("profile", "")
             command = step.get("command")
@@ -7791,10 +7904,16 @@ class TermForgeApp:
                     f"Invalid workflow command for step {step_id}: {command!r}"
                 )
 
-            return step_id, True, ""
+            after_output = self.capture_backend_output(lines=120)
+
+            return step_id, True, "", after_output
 
         except Exception as exc:
-            return step_id, False, str(exc)
+            after_output = self.capture_backend_output(lines=120)
+            return step_id, False, str(exc), after_output
+
+        finally:
+            self.restore_backend_context(backend_ctx)
 
     def run_workflow_parallel(
         self,
@@ -7970,7 +8089,7 @@ class TermForgeApp:
                 result = self.run_workflow_step(name, step)
                 results.append(result)
 
-            for step_id, ok, error in results:
+            for step_id, ok, error, output in results:
                 if ok:
                     completed.add(step_id)
 
@@ -7980,6 +8099,7 @@ class TermForgeApp:
                         step_id,
                         "success",
                         "Step completed",
+                        output=output,
                     )
                 else:
                     failed.add(step_id)
@@ -7992,6 +8112,7 @@ class TermForgeApp:
                         step_id,
                         "failed",
                         error,
+                        output=output,
                     )
 
         self.add_history_entry(
@@ -8279,50 +8400,23 @@ class TermForgeApp:
                     f"workflow step {step_id}",
                 )
 
-                if environment:
-                    self.set_current_environment(str(environment))
+                _step_id, ok, error, output = self.run_workflow_step(name, step)
 
-                if profile:
-                    self.select_window_profile(str(profile))
+                if ok:
+                    completed.add(step_id)
 
-                if isinstance(command, str):
-                    if "/" in command:
-                        category, cmd_name = command.split("/", 1)
-                        self.select_cmd(None, category, cmd_name)
-                    else:
-                        raise TermForgeError(
-                            "Workflow command string must be "
-                            f"Category/Command: {command}"
-                        )
-
-                elif isinstance(command, (list, tuple)):
-                    cmd_type, cmd_text, options = parse_command_entry(command)
-
-                    self.run_cmd(
-                        cmd_type,
-                        cmd_text,
-                        options,
-                        None,
-                        record_history=False,
+                    runner.step_done(
+                        f"Workflow step complete: {step_id}"
                     )
 
+                    self.update_workflow_step_state(
+                        step_id,
+                        "success",
+                        "Step completed",
+                        output=output,
+                    )
                 else:
-                    raise TermForgeError(
-                        f"Invalid workflow command for step "
-                        f"{step_id}: {command!r}"
-                    )
-
-                completed.add(step_id)
-
-                runner.step_done(
-                    f"Workflow step complete: {step_id}"
-                )
-
-                self.update_workflow_step_state(
-                    step_id,
-                    "success",
-                    "Step completed",
-                )
+                    raise TermForgeError(error)
 
             except Exception as exc:
                 failed.add(step_id)
@@ -8335,6 +8429,7 @@ class TermForgeApp:
                     step_id,
                     "failed",
                     str(exc),
+                    output=self.capture_backend_output(lines=120),
                 )
 
                 self.show_traceback_window(
@@ -10307,6 +10402,8 @@ class TermForgeApp:
 
         category = schedule.get("category")
         command = schedule.get("command")
+        target_type = schedule.get("target_type", "command")
+
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         schedule["_last_run"] = now
@@ -10316,24 +10413,16 @@ class TermForgeApp:
 
         categories = getattr(self.cfg, "Categories", {})
 
+        backend_ctx = self.snapshot_backend_context()
+
         try:
-            if category not in categories:
-                raise TermForgeError(f"Scheduled category not found: {category}")
-
-            if command not in categories[category]:
-                raise TermForgeError(f"Scheduled command not found: {category}/{command}")
-
-            entry = categories[category][command]
-            cmd_type, _cmd, _options = parse_command_entry(entry)
-
-            target_type = schedule.get("target_type", "command")
+            self.apply_backend_override(schedule)
 
             priority = schedule.get("priority", "normal")
             if priority not in PRIORITY_ORDER:
                 priority = "normal"
 
             if target_type == "workflow":
-
                 workflow_name = schedule.get("workflow", "").strip()
 
                 if not workflow_name:
@@ -10351,7 +10440,29 @@ class TermForgeApp:
                     priority=priority,
                 )
 
+                schedule["_last_status"] = "queued"
+                schedule["_last_error"] = ""
+
+                self.add_schedule_history(schedule, "queued", "")
+                self.log(f"Scheduled workflow queued: {workflow_name}")
+
+                self.show_toast(
+                    f"✓ Scheduled workflow queued:\n{workflow_name}"
+                )
+
             else:
+                if category not in categories:
+                    raise TermForgeError(
+                        f"Scheduled category not found: {category}"
+                    )
+
+                if command not in categories[category]:
+                    raise TermForgeError(
+                        f"Scheduled command not found: {category}/{command}"
+                    )
+
+                entry = categories[category][command]
+                _cmd_type, _cmd, _options = parse_command_entry(entry)
 
                 profile = schedule.get("profile", "").strip()
 
@@ -10359,7 +10470,6 @@ class TermForgeApp:
                     self.log(
                         f"Scheduled command selecting profile: {profile}"
                     )
-
                     self.select_window_profile(profile)
 
                 self.set_status(
@@ -10379,15 +10489,15 @@ class TermForgeApp:
                     priority=priority,
                 )
 
-            schedule["_last_status"] = "success"
-            schedule["_last_error"] = ""
+                schedule["_last_status"] = "queued"
+                schedule["_last_error"] = ""
 
-            self.add_schedule_history(schedule, "success", "")
-            self.log(f"Scheduled command success: {category}/{command}")
+                self.add_schedule_history(schedule, "queued", "")
+                self.log(f"Scheduled command queued: {category}/{command}")
 
-            self.show_toast(
-                f"✓ Scheduled command completed:\n{category}/{command}"
-            )
+                self.show_toast(
+                    f"✓ Scheduled command queued:\n{category}/{command}"
+                )
 
         except Exception as exc:
             schedule["_last_status"] = "failed"
@@ -10406,12 +10516,16 @@ class TermForgeApp:
                     exc,
                 )
 
-                self.log(f"Scheduled command failed: {category}/{command}: ", exc)
+                self.log(
+                    f"Scheduled command failed: {category}/{command}: ",
+                    exc,
+                )
 
             except Exception:
                 pass
 
         finally:
+            self.restore_backend_context(backend_ctx)
             self.persist_full_config()
 
     def run_startup_schedules(self) -> None:
