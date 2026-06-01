@@ -2,6 +2,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import threading
 from datetime import datetime
 
 
@@ -61,7 +62,19 @@ class SubprocessBackend:
         return self.run_detached(text, record_history=record_history)
 
     def run_detached(self, command: str, record_history: bool = True):
-        proc = subprocess.Popen(command, shell=True)
+        proc = subprocess.Popen(
+            command,
+            shell=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        threading.Thread(
+            target=proc.wait,
+            daemon=True,
+        ).start()
 
         self.app.current_process = proc
         self.app.current_process_job = {
@@ -80,7 +93,6 @@ class SubprocessBackend:
                 command,
                 source="backend",
             )
-
 
 class TmuxBackend:
     name = "tmux"
