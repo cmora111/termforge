@@ -2,6 +2,9 @@ import json
 import pprint
 from tkinter import *
 from tkinter import messagebox, simpledialog
+from ..utils.parsing import (
+    parse_command_entry,
+)
 
 class HotkeyEditorWindow:
     def __init__(self, app):

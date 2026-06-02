@@ -44,6 +44,24 @@ from .ui.profiles import (
     ProfileManagerWindow,
     ConfigHealthCheckWindow,
 )
+from .ui.theme import button_style
+from .utils.parsing import (
+    parse_command_entry,
+)
+from .utils.workflows import (
+    clean_captured_output,
+    extract_termforge_capture,
+)
+from .utils.variables import (
+    resolve_shared_variables,
+    resolve_workflow_variables,
+)
+from .utils.variables import (
+    resolve_shared_variables,
+    resolve_workflow_variables,
+)
+from .utils.validation import validate_workflow_steps
+from .services.backup_service import create_project_snapshot
 
 import tarfile
 import importlib.util
@@ -181,16 +199,6 @@ def ensure_user_config() -> None:
     backup_dir = Path(getattr(cfg, "BackupDir", CONFIG_DIR / "backups"))
     backup_dir.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
-
-def parse_command_entry(entry):
-    if isinstance(entry, (list, tuple)):
-        if len(entry) == 2:
-            return entry[0], entry[1], {}
-        if len(entry) >= 3:
-            options = entry[2] if isinstance(entry[2], dict) else {}
-            return entry[0], entry[1], options
-    raise ValueError(f"Invalid command entry format: {entry!r}")
-
 
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
@@ -501,55 +509,7 @@ class TermForgeApp:
         return Path(__file__).resolve().parents[2]
 
     def create_project_snapshot_backup(self) -> Path:
-        project_root = self.get_project_root()
-
-        backup_dir = CONFIG_DIR / "backups" / "project"
-        backup_dir.mkdir(parents=True, exist_ok=True)
-
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        target = backup_dir / f"termforge-project-{timestamp}.tar.gz"
-
-        exclude_names = {
-            ".git",
-            ".venv",
-            "venv",
-            "__pycache__",
-            ".pytest_cache",
-            ".mypy_cache",
-            "dist",
-            "build",
-        }
-
-        exclude_suffixes = (
-            ".pyc",
-            ".pyo",
-        )
-
-        def should_exclude(path: Path) -> bool:
-            parts = set(path.parts)
-
-            if parts.intersection(exclude_names):
-                return True
-
-            if path.name.endswith(exclude_suffixes):
-                return True
-
-            if path.name.endswith(".egg-info"):
-                return True
-
-            return False
-
-        with tarfile.open(target, "w:gz") as tar:
-            for path in project_root.rglob("*"):
-                if should_exclude(path.relative_to(project_root)):
-                    continue
-
-                tar.add(
-                    path,
-                    arcname=path.relative_to(project_root),
-                    recursive=False,
-                )
-
+        target = create_project_snapshot(self.get_project_root())
         self.set_status(f"Project snapshot created: {target}")
         return target
 
@@ -583,82 +543,17 @@ class TermForgeApp:
         setattr(self.cfg, "SharedVariables", variables)
         self.persist_full_config()
 
-
     def resolve_shared_variables_in_text(self, text: str) -> str:
-        if not isinstance(text, str):
-            return text
-
-        variables = self.get_shared_variables()
-
-        def replace_var(match):
-            key = match.group(1)
-            return str(variables.get(key, match.group(0)))
-
-        return re.sub(
-            r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}",
-            replace_var,
+        return resolve_shared_variables(
             text,
+            self.get_shared_variables(),
         )
 
     def clean_captured_output(self, text: str) -> str:
-        if not isinstance(text, str):
-            return ""
-
-        text = text.replace("\x00", "")
-        text = text.replace("\\N", "")
-
-        lines = []
-        for line in text.splitlines():
-            line = line.rstrip()
-            if line:
-                lines.append(line)
-
-        return "\n".join(lines)
+        return clean_captured_output(text)
 
     def extract_termforge_capture(self, output: str) -> str:
-        if not output:
-            return ""
-
-        start = "__TF_CAPTURE_START__"
-        end = "__TF_CAPTURE_END__"
-
-        if start in output and end in output:
-            before_end = output.rsplit(end, 1)[0]
-            chunk = before_end.rsplit(start, 1)[-1]
-        else:
-            chunk = output
-
-        lines = []
-
-        for line in chunk.splitlines():
-            line = line.strip()
-
-            if not line:
-                continue
-
-            # Ignore echoed commands
-            if start in line or end in line:
-                continue
-
-            # Ignore shell prompts like:
-            # mora@spectrix:~(12:26:25)$
-            if re.search(r"^[^@\s]+@[^:\s]+:.*\([0-9:]+\)\$", line):
-                continue
-
-            # Ignore job-control messages
-            if line.startswith("["):
-                continue
-
-            if line.startswith("(wd "):
-                continue
-
-            # Ignore bash errors/prompts
-            if "syntax error near unexpected token" in line:
-                continue
-
-            lines.append(line)
-
-        return lines[-1] if lines else ""
+        return extract_termforge_capture(output)
 
     def get_workflow_output_vars(self) -> dict:
         if not self.current_workflow_state:
@@ -676,21 +571,10 @@ class TermForgeApp:
         output_vars = self.get_workflow_output_vars()
         output_vars[name] = value
 
-
     def resolve_workflow_output_vars(self, text: str) -> str:
-        if not isinstance(text, str):
-            return text
-
-        output_vars = self.get_workflow_output_vars()
-
-        def replace_var(match):
-            key = match.group(1)
-            return str(output_vars.get(key, match.group(0)))
-
-        return re.sub(
-            r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}",
-            replace_var,
+        return resolve_workflow_variables(
             text,
+            self.get_workflow_output_vars(),
         )
 
     def snapshot_backend_context(self) -> dict:
@@ -1303,65 +1187,8 @@ class TermForgeApp:
         setattr(self.cfg, "Workflows", workflows)
         self.persist_full_config()
 
-
-    def validate_workflow(self, steps: list) -> list[str]:
-        errors = []
-
-        if not isinstance(steps, list) or not steps:
-            return ["Workflow must contain at least one step."]
-
-        ids = set()
-
-        for index, step in enumerate(steps, start=1):
-            if not isinstance(step, dict):
-                errors.append(f"Step {index}: step must be a dictionary.")
-                continue
-
-            step_id = str(step.get("id", "")).strip()
-            command = step.get("command")
-
-            if not step_id:
-                errors.append(f"Step {index}: missing id.")
-            elif step_id in ids:
-                errors.append(f"Step {index}: duplicate id: {step_id}")
-            else:
-                ids.add(step_id)
-
-            if command is None:
-                errors.append(f"Step {index}: missing command.")
-
-            depends_on = step.get("depends_on", [])
-            if isinstance(depends_on, str):
-                depends_on = [depends_on]
-
-            run_if = str(step.get("run_if", "always")).strip().lower()
-
-            if run_if not in ("always", "success", "failed", "never"):
-                errors.append(
-                    f"Step {index}: run_if must be always, success, failed, or never."
-                )
-
-            if not isinstance(depends_on, list):
-                errors.append(f"Step {index}: depends_on must be a list or string.")
-
-        for step in steps:
-            if not isinstance(step, dict):
-                continue
-
-            step_id = str(step.get("id", "")).strip()
-            depends_on = step.get("depends_on", [])
-
-            if isinstance(depends_on, str):
-                depends_on = [depends_on]
-
-            if isinstance(depends_on, list):
-                for dep in depends_on:
-                    if dep not in ids:
-                        errors.append(
-                            f"Step {step_id}: depends_on references missing step: {dep}"
-                        )
-
-        return errors
+    def validate_workflow(self, steps):
+        return validate_workflow_steps(steps)
 
     def run_workflow(
         self,

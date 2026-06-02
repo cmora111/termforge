@@ -3,6 +3,9 @@ import pprint
 from tkinter import *
 from tkinter import filedialog, messagebox, simpledialog
 from .chain_builder import ChainBuilderWindow
+from ..utils.parsing import (
+    parse_command_entry,
+)
 
 
 class CategoryEditorWindow:
@@ -212,15 +215,6 @@ class CategoryEditorWindow:
 
         self.app.persist_full_config()
         self.refresh()
-
-    def parse_command_entry(entry):
-        if isinstance(entry, (list, tuple)):
-            if len(entry) == 2:
-                return entry[0], entry[1], {}
-            if len(entry) >= 3:
-                return entry[0], entry[1], entry[2] or {}
-
-        raise ValueError(f"Invalid command entry: {entry!r}")
 
 class CommandEditorWindow:
     def __init__(self, app):

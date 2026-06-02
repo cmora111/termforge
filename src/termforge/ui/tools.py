@@ -2,8 +2,9 @@ from pathlib import Path
 import pprint
 from tkinter import *
 from tkinter import messagebox, ttk, filedialog, simpledialog
-
-PLUGIN_DIR = Path.home() / ".config" / "termforge" / "plugins"
+from ..constants import PLUGIN_DIR, PRIORITY_ORDER
+from ..services.plugin_service import discover_plugins
+from ..constants import PLUGIN_DIR
 
 class PluginManagerWindow:
     def __init__(self, app):
@@ -130,15 +131,24 @@ class PluginManagerWindow:
         self.info.insert("1.0", "\n".join(lines))
 
     def run_selected(self):
-        queue[0]["priority"] = "critical"
         item = self.selected_item()
 
         if not item:
+            messagebox.showerror(
+                "Plugin Manager",
+                "Select a plugin first.",
+            )
             return
 
-        self.window.destroy()
-        self.app.set_status(f'Palette run: {item["category"]}/{item["name"]}')
-        self.app.select_cmd(None, item["category"], item["name"])
+        name = item
+
+        try:
+            self.app.run_plugin(name)
+        except Exception as exc:
+            self.app.show_traceback_window(
+                "Run Plugin Failed",
+                exc,
+            )
 
     def disable_selected(self):
         item = self.current_item()

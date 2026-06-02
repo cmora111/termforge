@@ -3,9 +3,8 @@ from tkinter import filedialog, messagebox, simpledialog
 from pathlib import Path
 from datetime import datetime
 import pprint
-
-CONFIG_DIR = Path.home() / ".config" / "termforge"
-CONFIG_FILE = CONFIG_DIR / "config.py"
+from ..constants import CONFIG_DIR, CONFIG_FILE, BACKUP_DIR, PROJECT_BACKUP_DIR
+from .theme import button_style
 
 class BackupManagerWindow:
     def __init__(self, app):
@@ -34,21 +33,15 @@ class BackupManagerWindow:
             action_row.columnconfigure(i, weight=1)
 
         Button(action_row, text="Project Snapshot", bg="#2e8b57", fg="white", activebackground="#3ca06a", activeforeground="white", command=self.create_project_snapshot,).grid(row=0, column=0, sticky="ew", padx=2, pady=2)
-        Button(action_row, text="Refresh", bg="#1f6aa5", fg="white", activebackground="#2d82c7", activeforeground="white", command=self.refresh,).grid(row=0, column=1, sticky="ew", padx=2, pady=2)
+        Button(
+            action_row,
+            text="Refresh",
+            command=self.refresh,
+            **button_style("primary"),
+        ).grid(row=0, column=1, sticky="ew", padx=2, pady=2)
         Button(action_row, text="Restore", bg="#b8860b", fg="black", activebackground="#d4a017", activeforeground="black", command=self.restore_selected,).grid(row=0, column=2, sticky="ew", padx=2, pady=2)
         Button( action_row, text="Export", bg="#5b4b8a", fg="white", activebackground="#7460aa", activeforeground="white", command=self.export_selected,).grid(row=1, column=0, sticky="ew", padx=2, pady=2)
         Button(action_row, text="Close", bg="#b22222", fg="white", activebackground="#d63c3c", activeforeground="white", command=self.window.destroy,).grid(row=1, column=2, sticky="ew", padx=2, pady=2)
-
-#         action_row = Frame(outer)
-#         action_row.pack(fill=X, pady=(0, 8))
-# 
-#         Button(action_row, text="Project Snapshot", width=18, bg="darkgreen", fg="white", command=self.create_project_snapshot,).pack(side=LEFT, padx=(0, 6))
-#         Button(action_row, text="Refresh", width=14, bg="navy", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
-#         Button(action_row, text="Restore", width=14, bg="#7f6000", fg="white", command=self.restore_selected).pack(side=LEFT, padx=(0, 6))
-#         Button(action_row, text="Export Copy", width=14, bg="#2f5597", fg="white", command=self.export_selected).pack(side=LEFT, padx=(0, 6))
-#         Button(action_row, text="Delete", width=14, bg="#7f0000", fg="white", command=self.delete_selected).pack(side=LEFT, padx=(0, 6))
-#         Button(action_row, text="Open Folder", width=14, bg="#444444", fg="white", command=self.open_folder).pack(side=LEFT, padx=(0, 6))
-#         Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
 
         body = Frame(outer)
         body.pack(fill=BOTH, expand=True)
