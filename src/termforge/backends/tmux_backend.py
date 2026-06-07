@@ -1,8 +1,9 @@
 import shlex
 import shutil
 import subprocess
+from .base import BackendBase, BackendError
 
-class TmuxBackend:
+class TmuxBackend(BackendBase):
     name = "tmux"
     label = "tmux / Terminal Session"
     description = (
@@ -244,35 +245,7 @@ class TmuxBackend:
             "gnome-terminal",
         )
 
-# tilix
-
-#         subprocess.Popen(
-#             [
-#                 "tilix",
-#                 "-e",
-#                 "tmux",
-#                 "attach",
-#                 "-t",
-#                 session,
-#             ]
-#         )
-
-# normal terminal
-
-#         subprocess.Popen(
-#             [
-#                 terminal,
-#                 "--",
-#                 "tmux",
-#                 "attach",
-#                 "-t",
-#                 session,
-#             ]
-#         )
-
         self.app.set_status(f"Attached tmux session: {session}")
-
-
 
     def get_mode(self) -> str:
         return str(getattr(self.app.cfg, "TmuxMode", "pane") or "pane").lower()

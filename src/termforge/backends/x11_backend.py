@@ -1,7 +1,8 @@
 import shutil
+from .base import BackendBase, BackendError
 
 
-class X11Backend:
+class X11Backend(BackendBase):
     name = "x11"
     label = "X11 / xdotool / libxdo"
     description = (

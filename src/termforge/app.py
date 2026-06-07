@@ -1,10 +1,9 @@
 from __future__ import annotations
-from .backends.core import (
-    BackendError,
-    X11Backend,
-    SubprocessBackend,
-    TmuxBackend,
-)
+from .backends.base import BackendError
+from .backends.x11_backend import X11Backend
+from .backends.tmux_backend import TmuxBackend
+from .backends.subprocess_backend import SubprocessBackend
+
 from .ui.backend_manager import BackendManagerWindow
 from .ui.shared_variables import SharedVariableManagerWindow
 from .ui.workflow_monitor import (
@@ -62,6 +61,16 @@ from .utils.variables import (
 )
 from .utils.validation import validate_workflow_steps
 from .services.backup_service import create_project_snapshot
+from .services.workflow_service import (
+    start_workflow_state as make_workflow_state,
+    update_workflow_step_state as update_workflow_step,
+    finish_workflow_state as finish_workflow,
+)
+from .services.variable_service import (
+    get_shared_variables as svc_get_shared_variables,
+    set_shared_variable as svc_set_shared_variable,
+    delete_shared_variable as svc_delete_shared_variable,
+)
 
 import tarfile
 import importlib.util
@@ -514,33 +523,14 @@ class TermForgeApp:
         return target
 
     def get_shared_variables(self) -> dict:
-        variables = getattr(self.cfg, "SharedVariables", None)
-
-        if variables is None or not isinstance(variables, dict):
-            variables = {}
-            setattr(self.cfg, "SharedVariables", variables)
-
-        return variables
-
+        return svc_get_shared_variables(self.cfg)
 
     def set_shared_variable(self, name: str, value: str) -> None:
-        name = str(name).strip()
-
-        if not name:
-            raise TermForgeError("Shared variable name is required.")
-
-        variables = self.get_shared_variables()
-        variables[name] = str(value)
-
-        setattr(self.cfg, "SharedVariables", variables)
+        svc_set_shared_variable(self.cfg, name, value)
         self.persist_full_config()
 
-
     def delete_shared_variable(self, name: str) -> None:
-        variables = self.get_shared_variables()
-        variables.pop(name, None)
-
-        setattr(self.cfg, "SharedVariables", variables)
+        svc_delete_shared_variable(self.cfg, name)
         self.persist_full_config()
 
     def resolve_shared_variables_in_text(self, text: str) -> str:
@@ -689,18 +679,15 @@ class TermForgeApp:
         if status in ("success", "failed", "skipped"):
             row["finished_at"] = now
 
-
     def finish_workflow_state(self, status: str = "finished"):
-        if not self.current_workflow_state:
-            return
-
-        self.current_workflow_state["status"] = status
-        self.current_workflow_state["finished_at"] = datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
+        state = finish_workflow(
+            self.current_workflow_state,
+            status,
         )
 
-        self.workflow_history.insert(0, dict(self.current_workflow_state))
-        del self.workflow_history[50:]
+        if state:
+            self.workflow_history.insert(0, dict(state))
+            del self.workflow_history[50:]
 
     def detect_session_type(self) -> str:
         session = os.environ.get("XDG_SESSION_TYPE", "").strip().lower()
@@ -2636,42 +2623,63 @@ class TermForgeApp:
         run_fn(self, context)
 
     def _run_helper(self, payload: dict) -> dict:
-        command = [sys.executable, "-m", "termforge.xdo_helper"]
-        self.log(f"Running helper action={payload.get('action')} payload={payload}")
-        try:
-            proc = subprocess.run(
-                command,
-                input=json.dumps(payload),
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=HELPER_TIMEOUT_SECONDS,
-                check=False,
+        timeout = 20
+
+        if not isinstance(payload, dict):
+            raise TermForgeError(
+                f"xdo helper payload must be a dict: {payload!r}"
             )
-        except subprocess.TimeoutExpired as exc:
-            self.show_traceback_window("Helper timed out.", exc)
-        except Exception as exc:
-            self.show_traceback_window(f"Could not start helper: {exc}", exc)
 
-        stdout = (proc.stdout or "").strip()
-        stderr = (proc.stderr or "").strip()
-        if stderr:
-            logging.warning("helper stderr: %s", stderr)
+        if not payload.get("action"):
+            raise TermForgeError(
+                f"xdo helper payload missing action: {payload!r}"
+            )
 
-        if proc.returncode != 0 and not stdout:
-            raise TermForgeError(f"Helper exited with code {proc.returncode}" + (f": {stderr}" if stderr else ""))
+        command = [
+            sys.executable,
+            "-m",
+            "termforge.xdo_helper",
+        ]
 
-        if not stdout:
-            raise TermForgeError("Helper returned no data.")
+        if payload.get("action") == "select_window":
+            timeout = 120
+
+        proc = subprocess.run(
+            command,
+            input=json.dumps(payload),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+
+        if proc.returncode != 0:
+            raise TermForgeError(
+                "xdo helper failed:\n\n"
+                f"payload:\n{pprint.pformat(payload)}\n\n"
+                f"stdout:\n{proc.stdout}\n\n"
+                f"stderr:\n{proc.stderr}"
+            )
 
         try:
-            result = json.loads(stdout)
-        except json.JSONDecodeError as exc:
-            raise TermForgeError(f"Helper returned invalid JSON: {stdout!r}") from exc
+            data = json.loads(proc.stdout or "{}")
+        except Exception as exc:
+            raise TermForgeError(
+                "xdo helper returned invalid JSON:\n\n"
+                f"stdout:\n{proc.stdout}\n\n"
+                f"stderr:\n{proc.stderr}"
+            ) from exc
 
-        if result.get("status") != "ok":
-            raise TermForgeError(result.get("error", "Helper reported an unknown error."))
-        return result
+        ok = data.get("ok", False) or data.get("status") == "ok"
+
+        if not ok:    
+            raise TermForgeError(
+                "xdo helper reported failure:\n\n"
+                f"{pprint.pformat(data)}"
+            )
+
+        return data
 
     def validate_window_id(self, window_id) -> bool:
         if window_id in (None, "", "None"):
@@ -2709,14 +2717,23 @@ class TermForgeApp:
 
     def select_target_window(self) -> None:
         self.root.withdraw()
+        self.root.update_idletasks()
+        self.root.update()
+
         try:
-            result = self._run_helper({"action": "select_window"})
+            result = self._run_helper(
+                {
+                    "action": "get_active_window_after_delay",
+                    "delay": 3,
+                }
+            )
         finally:
             self.root.deiconify()
             self.root.lift()
             self.root.focus_force()
 
         selected = result.get("window_id")
+
         if not selected:
             raise TermForgeError("No window selected.")
 

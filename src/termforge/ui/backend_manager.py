@@ -1,8 +1,9 @@
 import shutil
+import pprint
 from tkinter import *
 from tkinter import messagebox
 
-from ..backends.core import X11Backend, SubprocessBackend, TmuxBackend
+from ..backends import X11Backend, SubprocessBackend, TmuxBackend
 
 class BackendManagerWindow:
     def __init__(self, app):
@@ -145,7 +146,11 @@ class BackendManagerWindow:
         self.info = Text(body, wrap="word", height=18)
         self.info.pack(fill=BOTH, expand=True)
 
-        self.refresh_info()
+        try:
+            if self.window.winfo_exists():
+                self.refresh_info()
+        except Exception:
+            pass
 
     def refresh_info(self):
         report = self.app.backend_health_report()
@@ -212,7 +217,11 @@ class BackendManagerWindow:
             self.app.show_traceback_window("Auto-detect Backend Failed", exc)
             return
 
-        self.refresh_info()
+        try:
+            if self.window.winfo_exists():
+                self.refresh_info()
+        except Exception:
+            pass
 
     def pick_tmux_target(self):
         try:
@@ -221,7 +230,11 @@ class BackendManagerWindow:
         except Exception as exc:
             self.app.show_traceback_window("Tmux Target Picker Failed", exc)
 
-        self.refresh_info()
+        try:
+            if self.window.winfo_exists():
+                self.refresh_info()
+        except Exception:
+            pass
 
     def apply_backend(self):
         name = self.backend_var.get().strip().lower()
@@ -255,7 +268,11 @@ class BackendManagerWindow:
             self.app.show_traceback_window("Apply Backend Failed", exc)
             return
 
-        self.refresh_info()
+        try:
+            if self.window.winfo_exists():
+                self.refresh_info()
+        except Exception:
+            pass
 
     def attach_tmux(self):
         try:
@@ -350,7 +367,11 @@ class BackendManagerWindow:
         except Exception as exc:
             self.app.show_traceback_window("Backend Test Failed", exc)
 
-        self.refresh_info()
+        try:
+            if self.window.winfo_exists():
+                self.refresh_info()
+        except Exception:
+            pass
 
     def send_text(self, text: str, record_history: bool = True):
         self.run_detached(text, record_history=record_history)
