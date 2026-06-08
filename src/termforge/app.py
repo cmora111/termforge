@@ -4,6 +4,7 @@ from .backends.x11_backend import X11Backend
 from .backends.tmux_backend import TmuxBackend
 from .backends.subprocess_backend import SubprocessBackend
 
+from .ui.backend_output import BackendOutputViewerWindow
 from .ui.backend_manager import BackendManagerWindow
 from .ui.shared_variables import SharedVariableManagerWindow
 from .ui.workflow_monitor import (
@@ -71,6 +72,7 @@ from .services.variable_service import (
     set_shared_variable as svc_set_shared_variable,
     delete_shared_variable as svc_delete_shared_variable,
 )
+from .errors import TermForgeError
 
 import tarfile
 import importlib.util
@@ -150,10 +152,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
 )
-
-
-class TermForgeError(RuntimeError):
-    pass
 
 
 def load_config():
@@ -448,6 +446,16 @@ class TermForgeApp:
             self.root.quit()
         finally:
             self.root.destroy()
+
+    def open_backend_output_viewer(self):
+        BackendOutputViewerWindow(self)
+
+    def record_backend_output(self, output: dict) -> None:
+        if not hasattr(self, "backend_outputs"):
+            self.backend_outputs = []
+
+        self.backend_outputs.insert(0, output)
+        del self.backend_outputs[100:]
 
     def open_shared_variable_manager(self):
         SharedVariableManagerWindow(self)
@@ -857,6 +865,22 @@ class TermForgeApp:
 
                 if isinstance(cmd_text, str):
                     cmd_text = self.resolve_workflow_output_vars(cmd_text)
+
+            backend_name = str(step.get("backend", "")).strip().lower()
+
+            if backend_name == "subprocess" and hasattr(self.backend, "run_capture"):
+                captured = self.backend.run_capture(str(cmd_text))
+
+                output_text = (
+                    f"STDOUT:\n{captured.get('stdout', '')}\n\n"
+                    f"STDERR:\n{captured.get('stderr', '')}\n\n"
+                    f"RETURN CODE: {captured.get('returncode')}"
+                )
+
+                if captured.get("returncode") != 0:
+                    return step_id, False, "Subprocess command failed", output_text
+
+                return step_id, True, "", output_text
 
                 self.run_cmd(
                     cmd_type,
@@ -3846,6 +3870,8 @@ class TermForgeApp:
         tools_menu.add_command(label="Open Plugin Folder", command=self.open_plugin_folder)
         tools_menu.add_separator()
         tools_menu.add_command(label="Shared Variable Manager", command=self.open_shared_variable_manager,)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Backend Output Viewer", command=self.open_backend_output_viewer,)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         automation_menu = Menu(menubar, tearoff=0)

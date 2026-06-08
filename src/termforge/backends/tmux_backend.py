@@ -2,6 +2,7 @@ import shlex
 import shutil
 import subprocess
 from .base import BackendBase, BackendError
+from ..errors import TermForgeError
 
 class TmuxBackend(BackendBase):
     name = "tmux"

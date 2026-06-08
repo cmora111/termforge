@@ -26,36 +26,64 @@ class SubprocessBackend(BackendBase):
     def send_text(self, text: str, record_history: bool = True):
         return self.run_detached(text, record_history=record_history)
 
-    def run_detached(self, command: str, record_history: bool = True):
-        proc = subprocess.Popen(
+        def run_detached(self, command: str, record_history: bool = True):
+            def worker():
+                started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+
+                finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                output = {
+                    "backend": "subprocess",
+                    "command": command,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "returncode": result.returncode,
+                    "started_at": started_at,
+                    "finished_at": finished_at,
+                }
+
+                if hasattr(self.app, "record_backend_output"):
+                    self.app.record_backend_output(output)
+
+            threading.Thread(
+                target=worker,
+                daemon=True,
+            ).start()
+
+            self.app.set_status("Started subprocess command")
+
+    def run_capture(self, command: str) -> dict:
+        started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        result = subprocess.run(
             command,
             shell=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
 
-        threading.Thread(
-            target=proc.wait,
-            daemon=True,
-        ).start()
+        finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        self.app.current_process = proc
-        self.app.current_process_job = {
-            "category": "",
+        output = {
+            "backend": "subprocess",
             "command": command,
-            "source": "subprocess",
-            "pid": proc.pid,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "returncode": result.returncode,
+            "started_at": started_at,
+            "finished_at": finished_at,
         }
 
-        self.app.set_status(f"Started subprocess PID {proc.pid}")
+        if hasattr(self.app, "record_backend_output"):
+            self.app.record_backend_output(output)
 
-        if record_history:
-            self.app.add_history_entry(
-                "subprocess",
-                command,
-                source="backend",
-            )
-
+        return output

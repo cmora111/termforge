@@ -11,6 +11,7 @@ def start_workflow_state(name: str, total: int, mode: str = "sequential") -> Non
         "status": "running",
         "steps": {},
         "output_vars": {},
+        "output": [],
     }
 
 def update_workflow_step_state(
@@ -21,10 +22,12 @@ def update_workflow_step_state(
     output: str = "",
 ) -> None:
 
-    if not current_workflow_state:
+    if not state:
         return
 
-    steps = current_workflow_state.setdefault("steps", {})
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    steps = state.setdefault("steps", {})
 
     row = steps.setdefault(
         step_id,
@@ -40,10 +43,20 @@ def update_workflow_step_state(
 
     row["status"] = status
     row["message"] = message
+
     if output:
         row["output"] = output
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        outputs = state.setdefault("outputs", [])
+        outputs.append(
+            {
+                "step_id": step_id,
+                "status": status,
+                "message": message,
+                "output": output,
+                "timestamp": now,
+            }
+        )
 
     if status == "running" and not row.get("started_at"):
         row["started_at"] = now
@@ -51,16 +64,11 @@ def update_workflow_step_state(
     if status in ("success", "failed", "skipped"):
         row["finished_at"] = now
 
+def finish_workflow_state(state: dict, status: str = "finished") -> dict:
+    if not state:
+        return {}
 
-def finish_workflow_state(status: str = "finished") -> None:
-    if not current_workflow_state:
-        return
-
-    current_workflow_state["status"] = status
-    current_workflow_state["finished_at"] = datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
-
-    workflow_history.insert(0, dict(current_workflow_state))
-    del workflow_history[50:]
+    state["status"] = status
+    state["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return state
 

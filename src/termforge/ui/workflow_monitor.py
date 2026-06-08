@@ -5,12 +5,14 @@ from tkinter import messagebox
 class WorkflowLiveMonitorWindow:
     def __init__(self, app):
         self.app = app
+
         self.window = Toplevel(app.root)
         self.window.title("Workflow Live Monitor")
-        self.window.geometry("980x620")
+        self.window.geometry("1200x720")
         self.window.transient(app.root)
 
         self.auto_refresh_enabled = True
+
         outer = Frame(self.window, padx=8, pady=8)
         outer.pack(fill=BOTH, expand=True)
 
@@ -63,19 +65,123 @@ class WorkflowLiveMonitorWindow:
             command=self.window.destroy,
         ).pack(side=RIGHT)
 
-        self.summary = Text(outer, wrap="word", height=7)
-        self.summary.pack(fill=X, pady=(0, 8))
+        paned = PanedWindow(
+            outer,
+            orient=HORIZONTAL,
+            sashrelief=RAISED,
+            sashwidth=6,
+        )
+        paned.pack(fill=BOTH, expand=True)
+
+        left = Frame(paned)
+        middle = Frame(paned)
+        right = Frame(paned)
+
+        paned.add(left, minsize=260)
+        paned.add(middle, minsize=320)
+        paned.add(right, minsize=520)
+
+        Label(
+            left,
+            text="Steps",
+            bg="#dddddd",
+            relief="raised",
+        ).pack(fill=X)
+
+        list_frame = Frame(left)
+        list_frame.pack(fill=BOTH, expand=True)
+
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.columnconfigure(1, weight=0)
+        list_frame.rowconfigure(0, weight=1)
 
         self.listbox = Listbox(
-            outer,
-            width=130,
-            height=18,
+            list_frame,
+            width=42,
             exportselection=False,
         )
-        self.listbox.pack(fill=BOTH, expand=True)
 
-        self.details = Text(outer, wrap="word", height=10)
-        self.details.pack(fill=BOTH, expand=True, pady=(8, 0))
+        list_scroll = Scrollbar(
+            list_frame,
+            orient=VERTICAL,
+            command=self.listbox.yview,
+        )
+
+        self.listbox.configure(yscrollcommand=list_scroll.set)
+
+        self.listbox.grid(row=0, column=0, sticky="nsew")
+        list_scroll.grid(row=0, column=1, sticky="ns")
+
+        Label(
+            middle,
+            text="Summary",
+            bg="#dddddd",
+            relief="raised",
+        ).pack(fill=X)
+
+        summary_frame = Frame(middle)
+        summary_frame.pack(fill=BOTH, expand=True)
+
+        summary_frame.columnconfigure(0, weight=1)
+        summary_frame.columnconfigure(1, weight=0)
+        summary_frame.rowconfigure(0, weight=1)
+
+        self.summary = Text(
+            summary_frame,
+            wrap="word",
+        )
+
+        summary_scroll = Scrollbar(
+            summary_frame,
+            orient=VERTICAL,
+            command=self.summary.yview,
+        )
+
+        self.summary.configure(yscrollcommand=summary_scroll.set)
+
+        self.summary.grid(row=0, column=0, sticky="nsew")
+        summary_scroll.grid(row=0, column=1, sticky="ns")
+
+        Label(
+            right,
+            text="Details",
+            bg="#dddddd",
+            relief="raised",
+        ).pack(fill=X)
+
+        details_frame = Frame(right)
+        details_frame.pack(fill=BOTH, expand=True)
+
+        details_frame.columnconfigure(0, weight=1)
+        details_frame.columnconfigure(1, weight=0)
+        details_frame.rowconfigure(0, weight=1)
+
+        self.details = Text(
+            details_frame,
+            wrap="none",
+        )
+
+        details_scroll_y = Scrollbar(
+            details_frame,
+            orient=VERTICAL,
+            command=self.details.yview,
+        )
+
+        self.details.configure(
+            yscrollcommand=details_scroll_y.set,
+        )
+
+        self.details.grid(
+            row=0,
+            column=0,
+            sticky="nsew",
+        )
+
+        details_scroll_y.grid(
+            row=0,
+            column=1,
+            sticky="ns",
+        )
 
         self.snapshot = []
         self.listbox.bind("<<ListboxSelect>>", self.on_select)
@@ -104,8 +210,10 @@ class WorkflowLiveMonitorWindow:
         if not state:
             self.summary.insert("1.0", "No workflow is currently running.")
             self.snapshot = []
+            details_view = self.details.yview()
             self.details.delete("1.0", END)
             self.details.insert("1.0", "No workflow step selected.")
+            self.details.yview_moveto(details_view[0])
             return
 
         steps = state.get("steps", {})
@@ -144,18 +252,15 @@ class WorkflowLiveMonitorWindow:
             )
 
         if not self.snapshot:
-            self.details.delete("1.0", END)
-            self.details.insert("1.0", "No workflow steps captured yet.")
             return
 
-        if selected_index is None or selected_index >= len(self.snapshot):
-            selected_index = 0
+        selected = self.listbox.curselection()
+        selected_index = selected[0] if selected else None
 
-        self.listbox.selection_clear(0, END)
-        self.listbox.selection_set(selected_index)
-        self.listbox.activate(selected_index)
+        # rebuild listbox here
 
-        self.show_step_details(selected_index)
+        if selected_index is not None and selected_index < self.listbox.size():
+            self.listbox.selection_set(selected_index)
 
     def toggle_auto_refresh(self):
         self.auto_refresh_enabled = not self.auto_refresh_enabled
