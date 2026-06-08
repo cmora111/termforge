@@ -1,0 +1,2 @@
+class TermForgeError(RuntimeError):
+    pass
