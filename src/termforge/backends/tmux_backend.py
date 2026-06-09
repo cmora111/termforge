@@ -248,6 +248,26 @@ class TmuxBackend(BackendBase):
 
         self.app.set_status(f"Attached tmux session: {session}")
 
-    def get_mode(self) -> str:
-        return str(getattr(self.app.cfg, "TmuxMode", "pane") or "pane").lower()
+    def capture_output(self, lines: int = 120) -> str:
+        target = self.target()
 
+        result = subprocess.run(
+            [
+                "tmux",
+                "capture-pane",
+                "-t",
+                target,
+                "-p",
+                "-S",
+                f"-{int(lines)}",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            return f"[capture failed: {result.stderr.strip()}]"
+
+        return result.stdout
