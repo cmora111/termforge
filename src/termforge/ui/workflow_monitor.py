@@ -1,6 +1,9 @@
 import pprint
+import json
+from datetime import datetime
+from pathlib import Path
 from tkinter import *
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 class WorkflowLiveMonitorWindow:
     def __init__(self, app):
@@ -320,7 +323,7 @@ class WorkflowHistoryViewerWindow:
 
         self.window = Toplevel(app.root)
         self.window.title("Workflow History Viewer")
-        self.window.geometry("1060x680")
+        self.window.geometry("1250x720")
         self.window.transient(app.root)
 
         outer = Frame(self.window, padx=8, pady=8)
@@ -339,67 +342,83 @@ class WorkflowHistoryViewerWindow:
         action_row = Frame(outer)
         action_row.pack(fill=X, pady=(0, 8))
 
-        Button(
-            action_row,
-            text="Copy Selected",
-            width=16,
-            bg="#2f5597",
-            fg="white",
-            command=self.copy_selected,
-        ).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Refresh", width=14, bg="navy", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Copy Selected", width=16, bg="#2f5597", fg="white", command=self.copy_selected).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Export Selected", width=16, bg="#5b4b8a", fg="white", command=self.export_selected,).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Clear History", width=16, bg="#7f6000", fg="white", command=self.clear_history).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
 
-        Button(
-            action_row,
-            text="Clear History",
-            width=16,
-            bg="#7f6000",
-            fg="white",
-            command=self.clear_history,
-        ).pack(side=LEFT, padx=(0, 6))
+        paned = PanedWindow(
+            outer,
+            orient=HORIZONTAL,
+            sashrelief=RAISED,
+            sashwidth=6,
+        )
+        paned.pack(fill=BOTH, expand=True)
 
-        Button(
-            action_row,
-            text="Close",
-            width=14,
-            bg="red",
-            fg="black",
-            command=self.window.destroy,
-        ).pack(side=RIGHT)
+        left = Frame(paned)
+        middle = Frame(paned)
+        right = Frame(paned)
 
-        body = Frame(outer)
-        body.pack(fill=BOTH, expand=True)
+        paned.add(left, minsize=260)
+        paned.add(middle, minsize=320)
+        paned.add(right, minsize=520)
 
-        left = Frame(body)
-        left.pack(side=LEFT, fill=BOTH, expand=True)
-
-        right = Frame(body)
-        right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
+        Label(left, text="Runs", bg="#dddddd", relief="raised").pack(fill=X)
+        run_frame = Frame(left)
+        run_frame.pack(fill=BOTH, expand=True)
 
         self.listbox = Listbox(
-            left,
-            width=58,
-            height=28,
+            run_frame,
+            width=42,
             exportselection=False,
         )
         self.listbox.pack(side=LEFT, fill=BOTH, expand=True)
 
-        scrollbar = Scrollbar(left, command=self.listbox.yview)
-        scrollbar.pack(side=RIGHT, fill=Y)
-        self.listbox.config(yscrollcommand=scrollbar.set)
+        run_scroll = Scrollbar(run_frame, command=self.listbox.yview)
+        run_scroll.pack(side=RIGHT, fill=Y)
+        self.listbox.config(yscrollcommand=run_scroll.set)
+
+        Label(middle, text="Steps", bg="#dddddd", relief="raised").pack(fill=X)
+        step_frame = Frame(middle)
+        step_frame.pack(fill=BOTH, expand=True)
+
+        self.step_list = Listbox(
+            step_frame,
+            width=42,
+            exportselection=False,
+        )
+        self.step_list.pack(side=LEFT, fill=BOTH, expand=True)
+
+        step_scroll = Scrollbar(step_frame, command=self.step_list.yview)
+        step_scroll.pack(side=RIGHT, fill=Y)
+        self.step_list.config(yscrollcommand=step_scroll.set)
+
+        Label(right, text="Details", bg="#dddddd", relief="raised").pack(fill=X)
+        details_frame = Frame(right)
+        details_frame.pack(fill=BOTH, expand=True)
+
+        details_frame.columnconfigure(0, weight=1)
+        details_frame.columnconfigure(1, weight=0)
+        details_frame.rowconfigure(0, weight=1)
 
         self.details = Text(
-            right,
-            wrap="word",
-            width=72,
-            height=30,
+            details_frame,
+            wrap="none",
         )
-        self.details.pack(fill=BOTH, expand=True)
+        self.details.grid(row=0, column=0, sticky="nsew")
+
+        details_scroll = Scrollbar(details_frame, orient=VERTICAL, command=self.details.yview)
+        details_scroll.grid(row=0, column=1, sticky="ns")
+        self.details.config(yscrollcommand=details_scroll.set)
 
         self.snapshot = []
+        self.current_steps = []
+
         self.listbox.bind("<<ListboxSelect>>", self.on_select)
+        self.step_list.bind("<<ListboxSelect>>", self.on_step_select)
 
         self.refresh()
-        self.auto_refresh()
 
     def refresh(self):
         new_snapshot = list(getattr(self.app, "workflow_history", []))
@@ -410,7 +429,7 @@ class WorkflowHistoryViewerWindow:
         self.snapshot = new_snapshot
 
         self.listbox.delete(0, END)
-        self.details.delete("1.0", END)
+#        self.details.delete("1.0", END)
 
         if not self.snapshot:
             self.details.insert(
@@ -458,14 +477,25 @@ class WorkflowHistoryViewerWindow:
     def on_select(self, _event=None):
         item = self.selected_item()
 
-        if item is None:
+        self.step_list.delete(0, END)
+        self.details.delete("1.0", END)
+        self.current_steps = []
+
+        if not item:
             return
 
-        self.details.delete("1.0", END)
-        self.details.insert(
-            "1.0",
-            pprint.pformat(item, indent=4),
-        )
+        steps = item.get("steps", {})
+
+        if isinstance(steps, dict):
+            self.current_steps = list(steps.values())
+        elif isinstance(steps, list):
+            self.current_steps = steps
+
+        for step in self.current_steps:
+            self.step_list.insert(
+                END,
+                f"{step.get('status')} — {step.get('id')}"
+            )
 
     def copy_selected(self):
         item = self.selected_item()
@@ -487,6 +517,58 @@ class WorkflowHistoryViewerWindow:
             "Workflow History Viewer",
             "Selected workflow history copied.",
         )
+
+    def export_selected(self):
+        run = self.selected_item()
+
+        if not run:
+            messagebox.showerror(
+                "Export Workflow Run",
+                "Select a workflow run first.",
+            )
+            return
+
+        workflow_name = str(run.get("name", "workflow")).strip() or "workflow"
+        safe_name = "".join(
+            ch if ch.isalnum() or ch in ("-", "_") else "_"
+            for ch in workflow_name
+        )
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+        default_dir = Path.home() / "Documents" / "termforge-workflows"
+        default_dir.mkdir(parents=True, exist_ok=True)
+
+        target = filedialog.asksaveasfilename(
+            title="Export Workflow Run",
+            initialdir=str(default_dir),
+            initialfile=f"{safe_name}-{timestamp}.json",
+            defaultextension=".json",
+            filetypes=[
+                ("JSON files", "*.json"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if not target:
+            return
+
+        try:
+            Path(target).write_text(
+                json.dumps(run, indent=4, sort_keys=True),
+                encoding="utf-8",
+            )
+
+            messagebox.showinfo(
+                "Export Workflow Run",
+                f"Workflow run exported:\n\n{target}",
+            )
+
+        except Exception as exc:
+            self.app.show_traceback_window(
+                "Export Workflow Run Failed",
+                exc,
+            )
 
     def clear_history(self):
         if not messagebox.askokcancel(
@@ -520,4 +602,64 @@ class WorkflowHistoryViewerWindow:
         except Exception:
             pass
 
+    def selected_step(self):
+        idxs = self.step_list.curselection()
+        if not idxs:
+            return None
 
+        index = idxs[0]
+
+        if index < 0 or index >= len(self.current_steps):
+            return None
+
+        return self.current_steps[index]
+
+
+    def on_step_select(self, _event=None):
+        run = self.selected_item()
+        step = self.selected_step()
+
+        self.details.delete("1.0", END)
+
+        if not run or not step:
+            return
+
+        step_id = step.get("id")
+        outputs = run.get("outputs", [])
+
+        matched = [
+            item for item in outputs
+            if item.get("step_id") == step_id
+        ]
+
+        lines = [
+            f"Workflow: {run.get('name')}",
+            f"Step: {step_id}",
+            f"Status: {step.get('status')}",
+            f"Message: {step.get('message')}",
+            f"Started: {step.get('started_at')}",
+            f"Finished: {step.get('finished_at')}",
+            "",
+            "=" * 80,
+            "Latest Step Output",
+            "=" * 80,
+            step.get("output", ""),
+            "",
+            "=" * 80,
+            "Output Events",
+            "=" * 80,
+        ]
+
+        for item in matched:
+            lines.extend(
+                [
+                    f"Time: {item.get('timestamp')}",
+                    f"Status: {item.get('status')}",
+                    f"Message: {item.get('message')}",
+                    "",
+                    item.get("output", ""),
+                    "-" * 80,
+                ]
+            )
+
+        self.details.insert("1.0", "\n".join(lines))
