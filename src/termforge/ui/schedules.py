@@ -301,7 +301,6 @@ class ScheduleManagerWindow:
         self.refresh_command_menu()
 
         self.command_var.set(schedule.get("command", ""))
-        self.target_type_var.set(schedule.get("target_type", "command"))
         self.update_target_type_ui()
         self.profile_var.set(schedule.get("profile", ""))
         self.priority_var.set(schedule.get("priority", "normal"))
@@ -588,33 +587,6 @@ class ScheduleHistoryWindow:
         else:
             self.info.insert("1.0", "Select a history entry.")
 
-    def on_select(self, _event=None):
-        idxs = self.listbox.curselection()
-        if not idxs:
-            return
-
-        self.target_type_var.set(schedule.get("target_type", "command"))
-        self.workflow_var.set(schedule.get("workflow", ""))
-        self.backend_var.set(schedule.get("backend", ""))
-        self.tmux_session_var.set(
-            schedule.get("tmux_session", getattr(self.app.cfg, "TmuxSession", "termforge"))
-        )
-        self.tmux_pane_var.set(
-            schedule.get("tmux_pane", getattr(self.app.cfg, "TmuxPane", ""))
-        )
-        self.tmux_mode_var.set(
-            schedule.get("tmux_mode", getattr(self.app.cfg, "TmuxMode", "pane"))
-        )
-
-        index = idxs[0]
-        if index < 0 or index >= len(self.snapshot):
-            return
-
-        entry = self.snapshot[index]
-
-        self.info.delete("1.0", END)
-        self.info.insert("1.0", pprint.pformat(entry, indent=4))
-
     def clear_history(self):
         if not messagebox.askokcancel(
             "Clear Schedule History",
@@ -626,4 +598,16 @@ class ScheduleHistoryWindow:
         self.app.persist_full_config()
         self.refresh()
 
+def on_select(self, _event=None):
+    idxs = self.listbox.curselection()
+    if not idxs:
+        return
 
+    index = idxs[0]
+    if index < 0 or index >= len(self.snapshot):
+        return
+
+    item = self.snapshot[index]
+
+    self.info.delete("1.0", END)
+    self.info.insert("1.0", pprint.pformat(item, indent=4))
