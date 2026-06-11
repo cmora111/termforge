@@ -1,4 +1,5 @@
 import pprint
+from datetime import datetime
 from tkinter import *
 from tkinter import messagebox
 from ..constants import PRIORITY_ORDER
@@ -538,6 +539,7 @@ class ScheduleManagerWindow:
         self.run_schedule_target(schedule)
 
     def run_schedule_target(self, schedule):
+        name = schedule.get("name", "")
         target_type = str(schedule.get("target_type", "command")).strip().lower()
 
         target = str(
@@ -547,42 +549,62 @@ class ScheduleManagerWindow:
             or ""
         ).strip()
 
-        if not target:
-            messagebox.showerror("Schedule Manager", "Schedule has no target.")
-            return
+        started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         try:
             if target_type == "workflow":
                 workflows = self.app.get_workflows()
 
                 if target not in workflows:
-                    messagebox.showerror(
-                        "Run Schedule",
-                        f"Unknown workflow:\n\n{target}",
-                    )
-                    return
+                    raise ValueError(f"Unknown workflow: {target}")
 
                 self.app.run_workflow(target)
+
             else:
                 category = str(schedule.get("category", "")).strip()
                 command_name = str(schedule.get("command", "")).strip()
-
-                target = str(schedule.get("target", "")).strip()
 
                 if target and "/" in target:
                     category, command_name = target.split("/", 1)
 
                 if not category or not command_name:
-                    messagebox.showerror(
-                        "Run Schedule",
-                        "Command schedule requires category and command.",
-                    )
-                    return
+                    raise ValueError("Command schedule requires category and command.")
 
                 self.app.select_cmd(None, category, command_name)
 
+            status = "success"
+            error = ""
+
         except Exception as exc:
+            status = "failed"
+            error = str(exc)
             self.app.show_traceback_window("Run Schedule Failed", exc)
+
+        history = getattr(self.app, "schedule_history", None)
+
+        if not isinstance(history, list):
+            history = []
+            self.app.schedule_history = history
+
+        history.insert(
+            0,
+            {
+                "name": name,
+                "status": status,
+                "target_type": target_type,
+                "target": target,
+                "category": schedule.get("category", ""),
+                "command": schedule.get("command", ""),
+                "workflow": schedule.get("workflow", ""),
+                "timestamp": started,
+                "error": error,
+            },
+        )
+
+        del history[100:]
+
+        if hasattr(self.app, "persist_full_config"):
+            self.app.persist_full_config()
 
 class ScheduleHistoryWindow:
     def __init__(self, app):
