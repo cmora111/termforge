@@ -2380,19 +2380,12 @@ class TermForgeApp:
             setattr(self.cfg, "Windows", windows)
         return windows
 
-
-
     def get_hotkeys_dict(self) -> dict:
         hotkeys = getattr(self.cfg, "Hotkeys", None)
         if hotkeys is None or not isinstance(hotkeys, dict):
             hotkeys = {}
             setattr(self.cfg, "Hotkeys", hotkeys)
         return hotkeys
-
-
-
-
-
 
     def get_disabled_plugins(self) -> list[str]:
         disabled = getattr(self.cfg, "DisabledPlugins", None)
@@ -3244,9 +3237,15 @@ class TermForgeApp:
     def run_scheduled_command(self, schedule: dict) -> None:
         from datetime import datetime
 
-        category = schedule.get("category")
-        command = schedule.get("command")
-        target_type = schedule.get("target_type", "command")
+        {
+            "name": schedule.get("name"),
+            "status": "success",
+            "target": schedule.get("target") or schedule.get("command") or schedule.get("workflow"),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            category: schedule.get("category"),
+            command: schedule.get("command"),
+            target_type: schedule.get("target_type", "command"),
+        }
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 

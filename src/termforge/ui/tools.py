@@ -1,5 +1,6 @@
 from pathlib import Path
 import pprint
+import time
 from tkinter import *
 from tkinter import messagebox, ttk, filedialog, simpledialog
 from ..constants import PLUGIN_DIR, PRIORITY_ORDER

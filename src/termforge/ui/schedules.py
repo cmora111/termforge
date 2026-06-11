@@ -1,6 +1,7 @@
 import pprint
 from tkinter import *
 from tkinter import messagebox
+from ..constants import PRIORITY_ORDER
 
 class ScheduleManagerWindow:
     def __init__(self, app):
@@ -43,7 +44,7 @@ class ScheduleManagerWindow:
         right = Frame(body)
         right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
 
-        self.listbox = Listbox(left, width=42, height=22)
+        self.listbox = Listbox(left, width=58, height=28, exportselection=False,)
         self.listbox.pack(side=LEFT, fill=Y)
 
         scrollbar = Scrollbar(left, command=self.listbox.yview)
@@ -215,29 +216,51 @@ class ScheduleManagerWindow:
         menu.delete(0, "end")
 
         for name in names:
-            menu.add_command(label=name, command=lambda value=name: self.command_var.set(value))
+            full_name = f"{category}/{name}"
+            menu.add_command(
+                label=full_name,
+                command=lambda value=full_name: self.command_var.set(value),
+            )
 
-        if names and self.command_var.get() not in names:
-            self.command_var.set(names[0])
+        full_names = [f"{category}/{name}" for name in names]
+
+        if full_names and self.command_var.get() not in full_names:
+            self.command_var.set(full_names[0])
+        elif not full_names:
+            self.command_var.set("")
         elif not names:
             self.command_var.set("")
 
     def refresh(self):
+        self.listbox.delete(0, END)
+        self.snapshot = []
+
         schedules = self.get_schedules()
 
-        self.snapshot = []
-        self.listbox.delete(0, END)
+        for index, schedule in enumerate(schedules):
+            self.snapshot.append(
+                {
+                    "_schedule_index": index,
+                    **schedule,
+                }
+            )
 
-        for index, schedule in enumerate(schedules, start=1):
-            if not isinstance(schedule, dict):
-                continue
+            enabled = "on" if schedule.get("enabled", True) else "off"
+            name = schedule.get("name", f"Schedule {index + 1}")
+            schedule_type = schedule.get("schedule_type", "")
+            target_type = str(schedule.get("target_type", "command")).strip() or "command"
 
-            self.snapshot.append(schedule)
+            target = (
+                schedule.get("target")
+                or schedule.get("command")
+                or schedule.get("workflow")
+                or ""
+            )
 
-            enabled = "ON" if schedule.get("enabled", True) else "OFF"
-            name = schedule.get("name", f"Schedule {index}")
-            schedule_type = schedule.get("type", "")
-            target_type = schedule.get("target_type", "command")
+            self.listbox.insert(
+                END,
+                f"[{enabled}] [{target_type}] {name} — {schedule_type} — {target}",
+            )
 
             category = schedule.get("category", "")
             command = schedule.get("command", "")
@@ -273,8 +296,6 @@ class ScheduleManagerWindow:
                 f"{target_text}{profile_text}{backend_text} — "
                 f"priority:{priority} — {status_text} — runs:{run_count}"
             )
-
-            self.listbox.insert(END, label)
 
         self.info.delete("1.0", END)
         self.info.insert(
@@ -327,8 +348,13 @@ class ScheduleManagerWindow:
     def build_schedule_from_form(self):
         name = self.name_var.get().strip()
         target_type = self.target_type_var.get().strip() or "command"
-        category = self.category_var.get().strip()
-        command = self.command_var.get().strip()
+        command_value = self.command_var.get().strip()
+
+        if "/" in command_value:
+            category, command = command_value.split("/", 1)
+        else:
+            category = self.category_var.get().strip()
+            command = command_value
         workflow = self.workflow_var.get().strip()
         profile = self.profile_var.get().strip()
         priority = self.priority_var.get().strip().lower() or "normal"
@@ -406,15 +432,24 @@ class ScheduleManagerWindow:
 
     def selected_schedule_index(self):
         idxs = self.listbox.curselection()
-        if not idxs:
+
+        if idxs:
+            list_index = idxs[0]
+        else:
+            try:
+                list_index = self.listbox.index(ACTIVE)
+            except Exception:
+                return None
+
+        if list_index < 0 or list_index >= len(self.snapshot):
             return None
 
-        index = idxs[0]
+        item = self.snapshot[list_index]
 
-        if index < 0 or index >= len(self.snapshot):
-            return None
+        if isinstance(item, dict) and "_schedule_index" in item:
+            return item["_schedule_index"]
 
-        return index
+        return list_index
 
     def save_schedule(self):
         try:
@@ -453,13 +488,38 @@ class ScheduleManagerWindow:
         self.refresh()
 
     def toggle_enabled(self):
-        index = self.selected_schedule_index()
-        if index is None:
+        idxs = self.listbox.curselection()
+
+        if not idxs:
             messagebox.showerror("Schedule Manager", "Select a schedule first.")
             return
 
+        list_index = idxs[0]
         schedules = self.get_schedules()
-        schedules[index]["enabled"] = not bool(schedules[index].get("enabled"))
+
+        # Prefer snapshot mapping if available
+        schedule_index = list_index
+
+        if hasattr(self, "snapshot") and list_index < len(self.snapshot):
+            item = self.snapshot[list_index]
+
+            if isinstance(item, dict) and "_schedule_index" in item:
+                schedule_index = item["_schedule_index"]
+
+        if schedule_index < 0 or schedule_index >= len(schedules):
+            messagebox.showerror(
+                "Schedule Manager",
+                f"Invalid schedule index.\n\n"
+                f"List index: {list_index}\n"
+                f"Schedule index: {schedule_index}\n"
+                f"Schedules: {len(schedules)}\n"
+                f"Snapshot: {len(getattr(self, 'snapshot', []))}",
+            )
+            return
+
+        schedules[schedule_index]["enabled"] = not bool(
+            schedules[schedule_index].get("enabled", True)
+        )
 
         self.app.persist_full_config()
         self.refresh()
@@ -475,7 +535,54 @@ class ScheduleManagerWindow:
         else:
             schedule = self.get_schedules()[index]
 
-        self.app.run_scheduled_command(schedule)
+        self.run_schedule_target(schedule)
+
+    def run_schedule_target(self, schedule):
+        target_type = str(schedule.get("target_type", "command")).strip().lower()
+
+        target = str(
+            schedule.get("target")
+            or schedule.get("command")
+            or schedule.get("workflow")
+            or ""
+        ).strip()
+
+        if not target:
+            messagebox.showerror("Schedule Manager", "Schedule has no target.")
+            return
+
+        try:
+            if target_type == "workflow":
+                workflows = self.app.get_workflows()
+
+                if target not in workflows:
+                    messagebox.showerror(
+                        "Run Schedule",
+                        f"Unknown workflow:\n\n{target}",
+                    )
+                    return
+
+                self.app.run_workflow(target)
+            else:
+                category = str(schedule.get("category", "")).strip()
+                command_name = str(schedule.get("command", "")).strip()
+
+                target = str(schedule.get("target", "")).strip()
+
+                if target and "/" in target:
+                    category, command_name = target.split("/", 1)
+
+                if not category or not command_name:
+                    messagebox.showerror(
+                        "Run Schedule",
+                        "Command schedule requires category and command.",
+                    )
+                    return
+
+                self.app.select_cmd(None, category, command_name)
+
+        except Exception as exc:
+            self.app.show_traceback_window("Run Schedule Failed", exc)
 
 class ScheduleHistoryWindow:
     def __init__(self, app):
@@ -556,37 +663,27 @@ class ScheduleHistoryWindow:
         return self.app.get_schedule_history()
 
     def refresh(self):
+        self.snapshot = list(getattr(self.app, "schedule_history", []))
+
         self.listbox.delete(0, END)
-        self.snapshot = []
 
-        for idx, entry in enumerate(self.get_history()):
-            timestamp = entry.get("timestamp", "")
-            status = entry.get("status", "")
-            name = entry.get("name", "")
-            target_type = entry.get("target_type", "command")
-            priority = entry.get("priority", "normal")
-            profile = entry.get("profile", "")
+        for item in self.snapshot:
+            name = item.get("name", "")
+            status = item.get("status", "")
+            target = item.get("target", "")
+            timestamp = item.get("timestamp", "")
 
-            if target_type == "workflow":
-                target = f"workflow/{entry.get('workflow', '')}"
-            else:
-                target = f"{entry.get('category', '')}/{entry.get('command', '')}"
-
-            profile_text = f" profile:{profile}" if profile else ""
-
-            label = (
-                f"{timestamp} [{status}] [{priority}] "
-                f"{name} — {target}{profile_text}"
+            self.listbox.insert(
+                END,
+                f"[{status}] {timestamp} — {name} — {target}",
             )
 
-            self.snapshot.append(entry)
-            self.listbox.insert(END, label)
-
         self.info.delete("1.0", END)
-        if not self.snapshot:
-            self.info.insert("1.0", "No schedule history yet.")
-        else:
-            self.info.insert("1.0", "Select a history entry.")
+        self.info.insert(
+            "1.0",
+            f"Schedule history entries: {len(self.snapshot)}\n\n"
+            "Select an entry to inspect it.",
+        )
 
     def on_select(self, _event=None):
         idxs = self.listbox.curselection()
