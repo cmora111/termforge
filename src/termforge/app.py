@@ -74,6 +74,7 @@ from .services.variable_service import (
 )
 from .errors import TermForgeError
 from .constants import CONFIG_DIR
+from .ui.settings import SettingsWindow
 
 import tarfile
 import importlib.util
@@ -446,6 +447,9 @@ class TermForgeApp:
             self.root.quit()
         finally:
             self.root.destroy()
+
+    def open_settings(self):
+        SettingsWindow(self)
 
     def open_backend_output_viewer(self):
         BackendOutputViewerWindow(self)
@@ -3872,6 +3876,8 @@ class TermForgeApp:
         menubar.add_cascade(label="File", menu=file_menu)
 
         tools_menu = Menu(menubar, tearoff=0)
+        tools_menu.add_command(label="Settings", command=self.open_settings,)
+        tools_menu.add_separator()
         tools_menu.add_command(label="Command Palette\tCtrl+P", command=self.open_command_palette)
         tools_menu.add_command(label="Command / Chain Editor", command=self.open_command_editor)
         tools_menu.add_command(label="Category Editor", command=self.open_category_editor)
