@@ -1,3 +1,11 @@
+Backend = "x11"
+TmuxSession = "termforge"
+TmuxPane = ""
+TmuxMode = "pane"
+
+AutoBackupMinutes = 30
+MaxBackupCount = 25
+
 debug = {"Flag": False}
 terminal = {"application": "gnome-terminal"}
 

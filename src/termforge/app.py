@@ -73,6 +73,7 @@ from .services.variable_service import (
     delete_shared_variable as svc_delete_shared_variable,
 )
 from .errors import TermForgeError
+from .constants import CONFIG_DIR
 
 import tarfile
 import importlib.util
@@ -91,12 +92,12 @@ import html
 import webbrowser
 import shlex
 from datetime import datetime
+from pathlib import Path
 
 try:
     from pynput import keyboard as pynput_keyboard
 except Exception:
     pynput_keyboard = None
-from pathlib import Path
 from tkinter import (
     BOTH,
     END,
@@ -153,7 +154,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 
-
 def load_config():
     if CONFIG_FILE.exists():
         spec = importlib.util.spec_from_file_location("termforge_user_config", CONFIG_FILE)
@@ -163,7 +163,6 @@ def load_config():
             return module
     from . import default_config
     return default_config
-
 
 def ensure_user_config() -> None:
     if CONFIG_FILE.exists():
@@ -206,6 +205,7 @@ def ensure_user_config() -> None:
     backup_dir = Path(getattr(cfg, "BackupDir", CONFIG_DIR / "backups"))
     backup_dir.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
+
 
 class TermForgeApp:
     def __init__(self, root: Tk, cfg) -> None:
@@ -2075,29 +2075,25 @@ class TermForgeApp:
         backup_dir.mkdir(parents=True, exist_ok=True)
         return backup_dir
 
+    def create_config_backup(self):
+        backup_dir = CONFIG_DIR / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        target = backup_dir / f"termforge-config-{timestamp}.py"
+
+        source = CONFIG_DIR / "config.py"
+
+        if not source.exists():
+            raise FileNotFoundError(f"Config file not found: {source}")
+
+        shutil.copy2(source, target)
+
+        return target
 
     def create_automatic_backup(self) -> str:
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        backup_dir = self.get_backup_dir()
-        target = backup_dir / f"termforge_auto_backup_{timestamp}.py"
-
-        if CONFIG_FILE.exists():
-            shutil.copy2(CONFIG_FILE, target)
-
-        backups = sorted(
-            backup_dir.glob("termforge_auto_backup_*.py"),
-            reverse=True,
-        )
-
-        for old in backups[25:]:
-            try:
-                old.unlink()
-            except Exception:
-                pass
-
-        self.log(f"Created automatic backup: {target}")
+        target = create_config_backup()
         return str(target)
-
 
     def export_full_config(self) -> None:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -2117,44 +2113,60 @@ class TermForgeApp:
 
         shutil.copy2(CONFIG_FILE, target)
 
+        prune_config_backups(backup_dir, keep=25)
+
         self.set_status(f"Exported configuration to {target}")
         messagebox.showinfo("Export Configuration", f"Exported to:\n\n{target}")
 
-
-    def import_full_config(self) -> None:
-        source = filedialog.askopenfilename(
-            title="Import TermForge Configuration",
-            filetypes=[
-                ("Python files", "*.py"),
-                ("All files", "*.*"),
-            ],
+    def prune_config_backups(backup_dir: Path, keep: int = 25) -> None:
+        backups = sorted(
+            backup_dir.glob("termforge-config-*.py"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
         )
 
-        if not source:
-            return
+        for path in backups[keep:]:
+            try:
+                path.unlink()
+            except Exception:
+                pass
 
-        if not messagebox.askokcancel(
-            "Import Configuration",
-            "Importing will replace your current TermForge configuration.\n\nContinue?",
-        ):
-            return
-
-        backup = self.create_automatic_backup()
-        shutil.copy2(source, CONFIG_FILE)
-
-        messagebox.showinfo(
-            "Import Complete",
-            "Configuration imported successfully.\n\n"
-            f"Previous config backup:\n{backup}\n\n"
-            "Restart TermForge to fully reload the imported configuration.",
+    def import_full_config(self, filename):
+        shutil.copy2(
+            filename,
+            self.config_file,
         )
 
-        self.set_status("Imported configuration. Restart recommended.")
+        self.reload_config()
 
+    def restore_config_backup(self, filename):
+        source = Path(filename)
+
+        if not source.exists():
+            raise FileNotFoundError(
+                f"Backup file not found: {source}"
+            )
+
+        config_file = Path(self.config_path)
+
+        # Safety backup of current config first
+        backup_file = config_file.with_suffix(".pre_restore.bak")
+
+        if config_file.exists():
+            shutil.copy2(config_file, backup_file)
+
+        shutil.copy2(source, config_file)
+
+        self.reload_config()
+
+        self.set_status(
+            f"Restored configuration from {source.name}"
+        )
+
+        return str(config_file)
 
     def is_scheduler_paused(self) -> bool:
         return bool(getattr(self.cfg, "SchedulerPaused", False))
-
 
     def set_scheduler_paused(self, paused: bool) -> None:
         setattr(self.cfg, "SchedulerPaused", bool(paused))
@@ -3675,73 +3687,78 @@ class TermForgeApp:
         self.root.bind_all("<Control-p>", self.open_command_palette)
         self.root.bind_all("<Control-P>", self.open_command_palette)
 
-
     def persist_full_config(self) -> None:
         import time
 
         now = time.time()
 
-        if now - getattr(self, "_last_backup_time", 0) > 900:
-            try:
-                self.create_automatic_backup()
-                self._last_backup_time = now
-            except Exception:
-                pass
         try:
-            terminal = getattr(self.cfg, "terminal", {"application": "gnome-terminal"})
-            debug = getattr(self.cfg, "debug", {"Flag": False})
-            windows = getattr(self.cfg, "Windows", {})
-            favorites = getattr(self.cfg, "Favorites", [])
-            recent = getattr(self.cfg, "Recent", [])
-            usage = getattr(self.cfg, "Usage", {})
-            hotkeys = getattr(self.cfg, "Hotkeys", {})
-            disabled_plugins = getattr(self.cfg, "DisabledPlugins", [])
-            chain_templates = getattr(self.cfg, "ChainTemplates", {})
-            tags = getattr(self.cfg, "Tags", {})
-            schedules = getattr(self.cfg, "Schedules", [])
-            schedule_history = getattr(self.cfg, "ScheduleHistory", [])
-            scheduler_paused = getattr(self.cfg, "SchedulerPaused", False)
-            categories = getattr(self.cfg, "Categories", {})
-            execution_history = getattr(self.cfg, "ExecutionHistory", [])
-            variables = getattr(self.cfg, "Variables", {})
-            environment_templates = getattr(self.cfg, "EnvironmentTemplates", {},)
-            workflows = getattr(self.cfg, "Workflows", {})
-            backend = getattr(self.cfg, "Backend", "x11")
-            tmux_session = getattr(self.cfg, "TmuxSession", "termforge")
-            tmux_pane = getattr(self.cfg, "TmuxPane", "")
-            tmux_mode = getattr(self.cfg, "TmuxMode", "pane")
-            shared_variables = getattr(self.cfg, "SharedVariables", {})
+            backup_minutes = int(getattr(self.cfg, "AutoBackupMinutes", 30))
+        except Exception:
+            backup_minutes = 30
+
+        if backup_minutes > 0:
+            if now - getattr(self, "_last_backup_time", 0) > backup_minutes * 60:
+                try:
+                    self.create_automatic_backup()
+                    self._last_backup_time = now
+                except Exception:
+                    pass
+
+        try:
+            skip_names = {
+                "__builtins__",
+                "__cached__",
+                "__doc__",
+                "__file__",
+                "__loader__",
+                "__name__",
+                "__package__",
+                "__spec__",
+            }
+
+            skip_prefixes = ("_",)
 
             lines = [
                 "# TermForge user configuration",
-                "# Edit Categories below.",
-                "",
-                f"terminal = {pprint.pformat(terminal, indent=4)}",
-                f"debug = {pprint.pformat(debug, indent=4)}",
-                f"Windows = {pprint.pformat(windows, indent=4)}",
-                f"Favorites = {pprint.pformat(favorites, indent=4)}",
-                f"Recent = {pprint.pformat(recent, indent=4)}",
-                f"Usage = {pprint.pformat(usage, indent=4)}",
-                f"Hotkeys = {pprint.pformat(hotkeys, indent=4)}",
-                f"DisabledPlugins = {pprint.pformat(disabled_plugins, indent=4)}",
-                f"ChainTemplates = {pprint.pformat(chain_templates, indent=4)}",
-                f"Tags = {pprint.pformat(tags, indent=4)}",
-                f"Schedules = {pprint.pformat(schedules, indent=4)}",
-                f"ScheduleHistory = {pprint.pformat(schedule_history, indent=4)}",
-                f"SchedulerPaused = {repr(bool(scheduler_paused))}",
-                f"Categories = {pprint.pformat(categories, indent=4)}",
-                f"ExecutionHistory = {pprint.pformat(execution_history, indent=4)}",
-                f"Variables = {pprint.pformat(variables, indent=4)}",
-                f"EnvironmentTemplates = {pprint.pformat(environment_templates, indent=4)}",
-                f"Workflows = {pprint.pformat(workflows, indent=4)}",
-                f"Backend = {repr(backend)}",
-                f"TmuxMode = {repr(tmux_mode)}",
-                f"SharedVariables = {pprint.pformat(shared_variables, indent=4)}",
+                "# Auto-generated by TermForge.",
                 "",
             ]
-            CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
+
+            for name in sorted(dir(self.cfg)):
+                if name in skip_names:
+                    continue
+
+                if name.startswith(skip_prefixes):
+                    continue
+
+                value = getattr(self.cfg, name)
+
+                if callable(value):
+                    continue
+
+                if hasattr(value, "__module__") and value.__module__ not in (
+                    "builtins",
+                    "__builtin__",
+                ):
+                    continue
+
+                lines.append(
+                    f"{name} = {pprint.pformat(value, indent=4)}"
+                )
+
+            lines.append("")
+
+            CONFIG_FILE.write_text(
+                "\n".join(lines),
+                encoding="utf-8",
+            )
+
         except Exception as exc:
-            self.show_traceback_window(f"Could not persist full config: ", exc)
+            self.show_traceback_window(
+                "Could not persist full config: ",
+                exc,
+            )
 
     def persist_categories(self) -> None:
         self.persist_full_config()

@@ -1,6 +1,7 @@
 from tkinter import *
 from tkinter import filedialog, messagebox, simpledialog
 from pathlib import Path
+import shutil
 from datetime import datetime
 import pprint
 from ..constants import CONFIG_DIR, CONFIG_FILE, BACKUP_DIR, PROJECT_BACKUP_DIR

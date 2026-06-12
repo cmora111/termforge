@@ -1,4 +1,5 @@
 import pprint
+from ..constants import PRIORITY_ORDER
 from tkinter import *
 from tkinter import messagebox
 
@@ -598,16 +599,117 @@ class ScheduleHistoryWindow:
         self.app.persist_full_config()
         self.refresh()
 
-def on_select(self, _event=None):
-    idxs = self.listbox.curselection()
-    if not idxs:
-        return
+    def on_select(self, _event=None):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            return
 
-    index = idxs[0]
-    if index < 0 or index >= len(self.snapshot):
-        return
+        index = idxs[0]
+        if index < 0 or index >= len(self.snapshot):
+            return
 
-    item = self.snapshot[index]
+        item = self.snapshot[index]
 
-    self.info.delete("1.0", END)
-    self.info.insert("1.0", pprint.pformat(item, indent=4))
+        lines = [
+            f"Name: {item.get('name', '')}",
+            f"Status: {item.get('status', '')}",
+            f"Target Type: {item.get('target_type', '')}",
+            f"Target: {item.get('target', '')}",
+            f"Category: {item.get('category', '')}",
+            f"Command: {item.get('command', '')}",
+            f"Workflow: {item.get('workflow', '')}",
+            f"Backend: {item.get('backend', '')}",
+            f"Started: {item.get('timestamp', '')}",
+            f"Finished: {item.get('finished_at', '')}",
+            f"Return Code: {item.get('returncode', '')}",
+            "",
+            "=" * 80,
+            "ERROR",
+            "=" * 80,
+            item.get("error", ""),
+            "",
+            "=" * 80,
+            "STDOUT",
+            "=" * 80,
+            item.get("stdout", ""),
+            "",
+            "=" * 80,
+            "STDERR",
+            "=" * 80,
+            item.get("stderr", ""),
+            "",
+            "=" * 80,
+            "RAW",
+            "=" * 80,
+            pprint.pformat(item, indent=4),
+        ]
+
+        self.info.delete("1.0", END)
+        self.info.insert("1.0", "\n".join(lines))
+
+    def run_schedule_target(self, schedule):
+        from datetime import datetime
+
+        name = schedule.get("name", "")
+        target_type = str(schedule.get("target_type", "command")).strip().lower()
+        started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        status = "success"
+        error = ""
+
+        try:
+            if target_type == "workflow":
+                workflow = str(schedule.get("workflow", "")).strip()
+
+                workflows = self.app.get_workflows()
+                if workflow not in workflows:
+                    raise ValueError(f"Unknown workflow: {workflow}")
+
+                self.app.run_workflow(workflow)
+                target = workflow
+
+            else:
+                category = str(schedule.get("category", "")).strip()
+                command_name = str(schedule.get("command", "")).strip()
+
+                if not category or not command_name:
+                    raise ValueError("Command schedule requires category and command.")
+
+                self.app.select_cmd(None, category, command_name)
+                target = f"{category}/{command_name}"
+
+        except Exception as exc:
+            status = "failed"
+            error = str(exc)
+            target = schedule.get("workflow") or f"{schedule.get('category', '')}/{schedule.get('command', '')}"
+            self.app.show_traceback_window("Run Schedule Failed", exc)
+
+        history = getattr(self.app, "schedule_history", None)
+        if not isinstance(history, list):
+            history = []
+            self.app.schedule_history = history
+
+        history.insert(
+            0,
+            {
+                "name": name,
+                "status": status,
+                "target_type": target_type,
+                "target": target,
+                "category": schedule.get("category", ""),
+                "command": schedule.get("command", ""),
+                "workflow": schedule.get("workflow", ""),
+                "backend": schedule.get("backend", ""),
+                "timestamp": started,
+                "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "returncode": "",
+                "stdout": "",
+                "stderr": "",
+                "error": error,
+            },
+        )
+
+        del history[100:]
+
+        if hasattr(self.app, "persist_full_config"):
+            self.app.persist_full_config()
