@@ -1,7 +1,10 @@
 import pprint
-from ..constants import PRIORITY_ORDER
+import json
+from pathlib import Path
+from datetime import datetime
 from tkinter import *
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
+from ..constants import PRIORITY_ORDER
 
 class ScheduleManagerWindow:
     def __init__(self, app):
@@ -512,6 +515,24 @@ class ScheduleHistoryWindow:
 
         Button(
             action_row,
+            text="Export Selected",
+            width=16,
+            bg="#5b4b8a",
+            fg="white",
+            command=self.export_selected,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
+            text="Export All",
+            width=14,
+            bg="#3d6d3d",
+            fg="white",
+            command=self.export_all,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
             text="Clear History",
             width=14,
             bg="#7f6000",
@@ -598,6 +619,66 @@ class ScheduleHistoryWindow:
         setattr(self.app.cfg, "ScheduleHistory", [])
         self.app.persist_full_config()
         self.refresh()
+
+    def export_selected(self):
+        idxs = self.listbox.curselection()
+        if not idxs:
+            messagebox.showerror("Schedule History", "Select a history entry first.")
+            return
+
+        index = idxs[0]
+        if index < 0 or index >= len(self.snapshot):
+            return
+
+        self.export_payload(
+            self.snapshot[index],
+            "schedule-history-entry",
+        )
+
+
+    def export_all(self):
+        self.export_payload(
+            self.snapshot,
+            "schedule-history-all",
+        )
+
+
+    def export_payload(self, payload, prefix):
+        default_dir = Path.home() / "Documents" / "termforge-schedules"
+        default_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+        target = filedialog.asksaveasfilename(
+            title="Export Schedule History",
+            initialdir=str(default_dir),
+            initialfile=f"{prefix}-{timestamp}.json",
+            defaultextension=".json",
+            filetypes=[
+                ("JSON files", "*.json"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if not target:
+            return
+
+        try:
+            Path(target).write_text(
+                json.dumps(payload, indent=4, sort_keys=True),
+                encoding="utf-8",
+            )
+
+            messagebox.showinfo(
+                "Schedule History",
+                f"Exported:\n\n{target}",
+            )
+
+        except Exception as exc:
+            self.app.show_traceback_window(
+                "Export Schedule History Failed",
+                exc,
+            )
 
     def on_select(self, _event=None):
         idxs = self.listbox.curselection()
