@@ -12,7 +12,7 @@ class WorkflowVariablesWindow:
 
         self.window = Toplevel(app.root)
         self.window.title("Workflow Variables")
-        self.window.geometry("900x620")
+        self.window.geometry("1000x760")
         self.window.transient(app.root)
 
         outer = Frame(self.window, padx=8, pady=8)
@@ -37,7 +37,7 @@ class WorkflowVariablesWindow:
         Button(action_row, text="Copy", width=14, bg="#2f5597", fg="white", command=self.copy_all).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Export", width=14, bg="#5b4b8a", fg="white", command=self.export).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Clear Runtime", width=14, bg="#7f6000", fg="white", command=self.clear_runtime).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
+        Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy,).pack(side=LEFT, padx=(0, 6))
 
         body = PanedWindow(
             outer,
