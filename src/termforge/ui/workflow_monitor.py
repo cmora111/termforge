@@ -461,11 +461,23 @@ class WorkflowHistoryViewerWindow:
         if item is None:
             return
 
-        self.details.delete("1.0", END)
-        self.details.insert(
-            "1.0",
-            pprint.pformat(item, indent=4),
+        variables = item.get("variables", {})
+
+        text = (
+            f"Name: {item.get('name', '')}\n"
+            f"Status: {item.get('status', '')}\n\n"
+            f"{'=' * 80}\n"
+            f"VARIABLES\n"
+            f"{'=' * 80}\n"
+            f"{pprint.pformat(variables, indent=4)}\n\n"
+            f"{'=' * 80}\n"
+            f"RAW\n"
+            f"{'=' * 80}\n"
+            f"{pprint.pformat(item, indent=4)}"
         )
+
+        self.details.delete("1.0", END)
+        self.details.insert("1.0", text)
 
     def copy_selected(self):
         item = self.selected_item()
