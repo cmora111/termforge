@@ -12,6 +12,7 @@ from .ui.workflow_monitor import (
     WorkflowHistoryViewerWindow,
 )
 from .ui.workflow_visualizer import WorkflowVisualizerWindow
+from .ui.workflow_variables import WorkflowVariablesWindow
 from .ui.schedules import (
     ScheduleManagerWindow,
     ScheduleHistoryWindow,
@@ -242,6 +243,7 @@ class TermForgeApp:
         self.current_environment = None
         self.current_workflow_state = None
         self.workflow_history = []
+        self.workflow_output_vars = {}
 
         self.backend = self.create_backend()
 
@@ -450,6 +452,9 @@ class TermForgeApp:
 
     def open_settings(self):
         SettingsWindow(self)
+
+    def open_workflow_variables(self):
+        WorkflowVariablesWindow(self)
 
     def open_backend_output_viewer(self):
         BackendOutputViewerWindow(self)
@@ -884,6 +889,17 @@ class TermForgeApp:
 
                 if captured.get("returncode") != 0:
                     return step_id, False, "Subprocess command failed", output_text
+
+                if capture_variable:
+                    captured_value = captured.get("stdout", "").strip()
+
+                    if not hasattr(self, "workflow_output_vars"):
+                        self.workflow_output_vars = {}
+
+                    self.workflow_output_vars[capture_variable] = captured_value
+
+                    if isinstance(getattr(self, "current_workflow_state", None), dict):
+                        self.current_workflow_state.setdefault("output_vars", {})[capture_variable] = captured_value
 
                 return step_id, True, "", output_text
 
@@ -3878,6 +3894,7 @@ class TermForgeApp:
 
         tools_menu = Menu(menubar, tearoff=0)
         tools_menu.add_command(label="Settings", command=self.open_settings)
+        tools_menu.add_command(label="Workflow Variables", command=self.open_workflow_variables)
         tools_menu.add_separator()
         tools_menu.add_command(label="Command Palette\tCtrl+P", command=self.open_command_palette)
         tools_menu.add_command(label="Command / Chain Editor", command=self.open_command_editor)
