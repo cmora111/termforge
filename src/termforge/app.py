@@ -698,6 +698,7 @@ class TermForgeApp:
         )
 
         if state:
+            state["variables"] = dict(getattr(self, "workflow_output_vars", {}))
             self.workflow_history.insert(0, dict(state))
             del self.workflow_history[50:]
 
