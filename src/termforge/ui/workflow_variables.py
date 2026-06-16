@@ -12,7 +12,7 @@ class WorkflowVariablesWindow:
 
         self.window = Toplevel(app.root)
         self.window.title("Workflow Variables")
-        self.window.geometry("900x620")
+        self.window.geometry("1000x760")
         self.window.transient(app.root)
 
         outer = Frame(self.window, padx=8, pady=8)
