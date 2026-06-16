@@ -32,6 +32,8 @@ class WorkflowVariablesWindow:
         action_row.pack(fill=X, pady=(0, 8))
 
         Button(action_row, text="Refresh", width=14, bg="navy", fg="white", command=self.refresh).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Promote Shared", width=16, bg="#3d6d3d", fg="white", command=self.promote_selected).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Delete Selected", width=16, bg="#7f6000", fg="white", command=self.delete_selected).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Copy", width=14, bg="#2f5597", fg="white", command=self.copy_all).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Export", width=14, bg="#5b4b8a", fg="white", command=self.export).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Clear Runtime", width=14, bg="#7f6000", fg="white", command=self.clear_runtime).pack(side=LEFT, padx=(0, 6))
@@ -187,6 +189,72 @@ class WorkflowVariablesWindow:
         self.window.clipboard_append(text)
 
         messagebox.showinfo("Workflow Variables", "Variables copied to clipboard.")
+
+    def promote_selected(self):
+        item = self.selected_item()
+
+        if not item:
+            messagebox.showerror("Workflow Variables", "Select a variable first.")
+            return
+
+        name = str(item.get("name", "")).strip()
+        value = item.get("value", "")
+
+        if not name:
+            return
+
+        shared = getattr(self.app.cfg, "SharedVariables", None)
+
+        if not isinstance(shared, dict):
+            shared = {}
+            setattr(self.app.cfg, "SharedVariables", shared)
+
+        shared[name] = value
+
+        self.app.persist_full_config()
+        self.app.set_status(f"Promoted workflow variable to SharedVariables: {name}")
+
+        self.refresh()
+
+
+    def delete_selected(self):
+        item = self.selected_item()
+
+        if not item:
+            messagebox.showerror("Workflow Variables", "Select a variable first.")
+            return
+
+        source = item.get("source")
+        name = str(item.get("name", "")).strip()
+
+        if not name:
+            return
+
+        if source == "runtime":
+            data = getattr(self.app, "workflow_output_vars", {})
+            if isinstance(data, dict):
+                data.pop(name, None)
+
+        elif source == "shared":
+            if not messagebox.askokcancel(
+                "Delete Shared Variable",
+                f"Delete shared variable '{name}' from config?",
+            ):
+                return
+
+            shared = getattr(self.app.cfg, "SharedVariables", {})
+            if isinstance(shared, dict):
+                shared.pop(name, None)
+                self.app.persist_full_config()
+
+        else:
+            messagebox.showerror(
+                "Workflow Variables",
+                f"Cannot delete variable from source: {source}",
+            )
+            return
+
+        self.refresh()
 
     def export(self):
         payload = self.collect_variables()
