@@ -1366,7 +1366,42 @@ class TermForgeApp:
                     f"workflow step {step_id}",
                 )
 
-                _step_id, ok, error, output = self.run_workflow_step(name, step)
+                retry_count = int(step.get("retry_count", 0) or 0)
+                retry_delay = int(step.get("retry_delay", 0) or 0)
+
+                attempt = 0
+                last_result = None
+
+                while True:
+                    attempt += 1
+
+                    self.update_workflow_step_state(
+                        step_id,
+                        "running",
+                        f"Attempt {attempt} of {retry_count + 1}",
+                    )
+
+                    step_id, ok, error, output = self.run_workflow_step(name, step)
+                    last_result = (step_id, ok, error, output)
+
+                    if ok:
+                        break
+
+                    if attempt > retry_count:
+                        break
+
+                    self.update_workflow_step_state(
+                        step_id,
+                        "running",
+                        f"Attempt {attempt} failed; retrying in {retry_delay}s: {error}",
+                        output,
+                    )
+
+                    if retry_delay > 0:
+                        import time
+                        time.sleep(retry_delay)
+
+                step_id, ok, error, output = last_result
 
                 if ok:
                     completed.add(step_id)
