@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "termforge"
-version = "0.5.0"
+version = "0.6.0"
 description = "Terminal workflow engine for X11 terminals (automation, macros, and command chains)"
 readme = "README.md"
 requires-python = ">=3.10"

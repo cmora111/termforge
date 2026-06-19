@@ -4,7 +4,7 @@ from . import __version__
 
 APP_NAME = "TermForge"
 APP_SLUG = "termforge"
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.6.0"
 
 CONFIG_DIR = Path.home() / ".config" / APP_SLUG
 CONFIG_FILE = CONFIG_DIR / "config.py"
