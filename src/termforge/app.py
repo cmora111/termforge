@@ -17,6 +17,7 @@ from .ui.schedules import (
     ScheduleManagerWindow,
     ScheduleHistoryWindow,
 )
+from .ui.workflow_editor import WorkflowEditorWindow
 from .ui.category_editor import (
     CategoryEditorWindow,
     CommandEditorWindow,
@@ -458,6 +459,22 @@ class TermForgeApp:
 
     def open_backend_output_viewer(self):
         BackendOutputViewerWindow(self)
+
+    def open_workflow_editor(self, workflow_name: str | None = None):
+        workflows = self.get_workflows()
+        names = sorted(workflows.keys())
+
+        if workflow_name is None:
+            if not names:
+                self.show_traceback_window(
+                    "Workflow Editor",
+                    Exception("No workflows exist yet."),
+                )
+                return
+
+            workflow_name = names[0]
+
+        WorkflowEditorWindow(self, workflow_name)
 
     def record_backend_output(self, output: dict) -> None:
         if not hasattr(self, "backend_outputs"):
@@ -3984,10 +4001,11 @@ class TermForgeApp:
         tools_menu.add_command(label="Command Palette\tCtrl+P", command=self.open_command_palette)
         tools_menu.add_command(label="Command / Chain Editor", command=self.open_command_editor)
         tools_menu.add_command(label="Category Editor", command=self.open_category_editor)
+        tools_menu.add_command(label="Workflow Editor", command=self.open_workflow_editor)
         tools_menu.add_command(label="Tag Manager", command=self.open_tag_manager)
         tools_menu.add_command(label="Plugin Manager", command=self.open_plugin_manager)
         tools_menu.add_separator()
-        tools_menu.add_command(label="Terminal Output Viewer", command=self.open_terminal_output_viewer,)
+        tools_menu.add_command(label="Terminal Output Viewer", command=self.open_terminal_output_viewer)
         tools_menu.add_separator()
         tools_menu.add_command(label="Hotkeys", command=self.show_hotkeys_help)
         tools_menu.add_command(label="Hotkey Editor", command=self.open_hotkey_editor)
@@ -3995,9 +4013,9 @@ class TermForgeApp:
         tools_menu.add_command(label="Reload Plugins", command=self.reload_plugins_with_notice)
         tools_menu.add_command(label="Open Plugin Folder", command=self.open_plugin_folder)
         tools_menu.add_separator()
-        tools_menu.add_command(label="Shared Variable Manager", command=self.open_shared_variable_manager,)
+        tools_menu.add_command(label="Shared Variable Manager", command=self.open_shared_variable_manager)
         tools_menu.add_separator()
-        tools_menu.add_command(label="Backend Output Viewer", command=self.open_backend_output_viewer,)
+        tools_menu.add_command(label="Backend Output Viewer", command=self.open_backend_output_viewer)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         automation_menu = Menu(menubar, tearoff=0)
