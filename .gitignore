@@ -23,6 +23,9 @@ build/
 post
 planned_updates
 
+# Scripts for maintenace
+scripts/
+
 # Logs
 *.log
 
