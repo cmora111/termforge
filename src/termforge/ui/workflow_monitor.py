@@ -387,15 +387,26 @@ class WorkflowHistoryViewerWindow:
         scrollbar.pack(side=RIGHT, fill=Y)
         self.listbox.config(yscrollcommand=scrollbar.set)
 
+        details_frame = Frame(right)
+        details_frame.pack(fill=BOTH, expand=True)
+
+        details_scroll = Scrollbar(details_frame)
+        details_scroll.pack(side=RIGHT, fill=Y)
+
         self.details = Text(
-            right,
+            details_frame,
             wrap="word",
-            width=72,
-            height=30,
+            width=50,
+            height=24,
+            yscrollcommand=details_scroll.set,
         )
-        self.details.pack(fill=BOTH, expand=True)
+
+        self.details.pack(side=LEFT, fill=BOTH, expand=True)
+
+        details_scroll.config(command=self.details.yview)
 
         self.snapshot = []
+        self.last_selected_history_index = None
         self.listbox.bind("<<ListboxSelect>>", self.on_select)
 
         self.refresh()
@@ -410,9 +421,9 @@ class WorkflowHistoryViewerWindow:
         self.snapshot = new_snapshot
 
         self.listbox.delete(0, END)
-        self.details.delete("1.0", END)
 
         if not self.snapshot:
+            self.details.delete("1.0", END)
             self.details.insert(
                 "1.0",
                 "No workflow history yet.",
@@ -456,6 +467,18 @@ class WorkflowHistoryViewerWindow:
         return self.snapshot[index]
 
     def on_select(self, _event=None):
+        idxs = self.listbox.curselection()
+
+        if not idxs:
+            return
+
+        index = idxs[0]
+
+        if index == getattr(self, "last_selected_history_index", None):
+            return
+
+        self.last_selected_history_index = index
+
         item = self.selected_item()
 
         if item is None:

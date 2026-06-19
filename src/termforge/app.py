@@ -1242,6 +1242,8 @@ class TermForgeApp:
 
         completed = set()
         failed = set()
+        skipped = set()
+        results = {}
 
         total = len(steps)
 
@@ -1259,10 +1261,14 @@ class TermForgeApp:
         for index, step in enumerate(steps, start=1):
             if not isinstance(step, dict):
                 message = f"Invalid workflow step: {step!r}"
+                step_id = f"step-{index}"
+
                 runner.step_failed(message)
-                failed.add(f"step-{index}")
+                failed.add(step_id)
+                results[step_id] = False
+
                 self.update_workflow_step_state(
-                    f"step-{index}",
+                    step_id,
                     "failed",
                     message,
                 )
@@ -1274,7 +1280,10 @@ class TermForgeApp:
                 if step_id == start_at:
                     start_found = True
                 else:
+                    skipped.add(step_id)
                     completed.add(step_id)
+                    results[step_id] = None
+
                     runner.step_done(
                         f"Skipped before retry start: {step_id}"
                     )
@@ -1291,15 +1300,15 @@ class TermForgeApp:
                 depends_on = [depends_on]
 
             run_if = (
-                str(step.get("run_if", "always"))
+                str(step.get("run_if", "success"))
                 .strip()
                 .lower()
-                or "always"
+                or "success"
             )
 
             missing = [
                 dep for dep in depends_on
-                if dep not in completed and dep not in failed
+                if dep not in results
             ]
 
             if missing:
@@ -1307,8 +1316,12 @@ class TermForgeApp:
                     f"Skipped {step_id}; unknown/unmet dependencies: "
                     f"{missing}"
                 )
+
                 runner.step_failed(message)
+
                 failed.add(step_id)
+                results[step_id] = False
+
                 self.update_workflow_step_state(
                     step_id,
                     "failed",
@@ -1316,10 +1329,16 @@ class TermForgeApp:
                 )
                 continue
 
-            dep_failed = any(dep in failed for dep in depends_on)
+            dep_failed = any(results.get(dep) is False for dep in depends_on)
+            dep_success = all(results.get(dep) is True for dep in depends_on)
 
             if run_if == "never":
                 runner.step_done(f"Skipped by run_if=never: {step_id}")
+
+                skipped.add(step_id)
+                completed.add(step_id)
+                results[step_id] = None
+
                 self.update_workflow_step_state(
                     step_id,
                     "skipped",
@@ -1327,14 +1346,19 @@ class TermForgeApp:
                 )
                 continue
 
-            if run_if == "success" and dep_failed:
+            if run_if == "success" and depends_on and not dep_success:
                 runner.step_done(
-                    f"Skipped because dependency failed: {step_id}"
+                    f"Skipped because dependency did not succeed: {step_id}"
                 )
+
+                skipped.add(step_id)
+                completed.add(step_id)
+                results[step_id] = None
+
                 self.update_workflow_step_state(
                     step_id,
                     "skipped",
-                    "Skipped because dependency failed",
+                    "Skipped because dependency did not succeed",
                 )
                 continue
 
@@ -1342,6 +1366,11 @@ class TermForgeApp:
                 runner.step_done(
                     f"Skipped because no dependency failed: {step_id}"
                 )
+
+                skipped.add(step_id)
+                completed.add(step_id)
+                results[step_id] = None
+
                 self.update_workflow_step_state(
                     step_id,
                     "skipped",
@@ -1349,9 +1378,23 @@ class TermForgeApp:
                 )
                 continue
 
-            environment = step.get("environment", "")
-            profile = step.get("profile", "")
-            command = step.get("command")
+            if run_if == "always":
+                pass
+            elif run_if not in ("success", "failed", "always", "never"):
+                runner.step_done(
+                    f"Skipped because run_if is invalid: {run_if}"
+                )
+
+                skipped.add(step_id)
+                completed.add(step_id)
+                results[step_id] = None
+
+                self.update_workflow_step_state(
+                    step_id,
+                    "skipped",
+                    f"Invalid run_if value: {run_if}",
+                )
+                continue
 
             try:
                 self.update_workflow_step_state(
@@ -1393,7 +1436,10 @@ class TermForgeApp:
                     self.update_workflow_step_state(
                         step_id,
                         "running",
-                        f"Attempt {attempt} failed; retrying in {retry_delay}s: {error}",
+                        (
+                            f"Attempt {attempt} failed; retrying in "
+                            f"{retry_delay}s: {error}"
+                        ),
                         output,
                     )
 
@@ -1405,6 +1451,7 @@ class TermForgeApp:
 
                 if ok:
                     completed.add(step_id)
+                    results[step_id] = True
 
                     runner.step_done(
                         f"Workflow step complete: {step_id}"
@@ -1417,10 +1464,13 @@ class TermForgeApp:
                         output=output,
                     )
                 else:
+                    failed.add(step_id)
+                    results[step_id] = False
                     raise TermForgeError(error)
 
             except Exception as exc:
                 failed.add(step_id)
+                results[step_id] = False
 
                 runner.step_failed(
                     f"Workflow step failed: {step_id}: {exc}"
