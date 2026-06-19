@@ -7,6 +7,7 @@ from .backends.subprocess_backend import SubprocessBackend
 from .ui.backend_output import BackendOutputViewerWindow
 from .ui.backend_manager import BackendManagerWindow
 from .ui.shared_variables import SharedVariableManagerWindow
+from .ui.workflow_picker import WorkflowPickerWindow
 from .ui.workflow_monitor import (
     WorkflowLiveMonitorWindow,
     WorkflowHistoryViewerWindow,
@@ -453,6 +454,9 @@ class TermForgeApp:
 
     def open_settings(self):
         SettingsWindow(self)
+
+    def open_workflow_picker(self):
+        WorkflowPickerWindow(self)
 
     def open_workflow_variables(self):
         WorkflowVariablesWindow(self)
@@ -3997,6 +4001,7 @@ class TermForgeApp:
         tools_menu = Menu(menubar, tearoff=0)
         tools_menu.add_command(label="Settings", command=self.open_settings)
         tools_menu.add_command(label="Workflow Variables", command=self.open_workflow_variables)
+        tools_menu.add_command(label="Workflow Picker", command=self.open_workflow_picker)
         tools_menu.add_separator()
         tools_menu.add_command(label="Command Palette\tCtrl+P", command=self.open_command_palette)
         tools_menu.add_command(label="Command / Chain Editor", command=self.open_command_editor)
