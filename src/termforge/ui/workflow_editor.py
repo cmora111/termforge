@@ -34,6 +34,9 @@ class WorkflowEditorWindow:
 
         Button(action_row, text="Add Step", width=14, bg="darkgreen", fg="white", command=self.add_step).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Update Step", width=14, bg="#2f5597", fg="white", command=self.update_step).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Move Up", width=12, bg="#555555", fg="white", command=self.move_step_up).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Move Down", width=12, bg="#555555", fg="white", command=self.move_step_down).pack(side=LEFT, padx=(0, 6))
+        Button(action_row, text="Duplicate", width=12, bg="#3d6d3d", fg="white", command=self.duplicate_step).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Delete Step", width=14, bg="#7f6000", fg="white", command=self.delete_step).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Save Workflow", width=16, bg="#5b4b8a", fg="white", command=self.save_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
@@ -129,6 +132,78 @@ class WorkflowEditorWindow:
             self.listbox.insert(END, f"{index + 1}. {step_id} [{backend}] run_if={run_if}")
 
         self.refresh_preview()
+
+    def select_index(self, index):
+        self.listbox.selection_clear(0, END)
+        self.listbox.selection_set(index)
+        self.listbox.activate(index)
+        self.listbox.see(index)
+        self.on_select()
+
+
+    def move_step_up(self):
+        index = self.selected_index()
+
+        if index is None:
+            messagebox.showerror("Workflow Editor", "Select a step first.")
+            return
+
+        if index <= 0:
+            return
+
+        self.steps[index - 1], self.steps[index] = self.steps[index], self.steps[index - 1]
+
+        self.refresh()
+        self.select_index(index - 1)
+
+
+    def move_step_down(self):
+        index = self.selected_index()
+
+        if index is None:
+            messagebox.showerror("Workflow Editor", "Select a step first.")
+            return
+
+        if index >= len(self.steps) - 1:
+            return
+
+        self.steps[index + 1], self.steps[index] = self.steps[index], self.steps[index + 1]
+
+        self.refresh()
+        self.select_index(index + 1)
+
+
+    def duplicate_step(self):
+        import copy
+
+        index = self.selected_index()
+
+        if index is None:
+            messagebox.showerror("Workflow Editor", "Select a step first.")
+            return
+
+        step = copy.deepcopy(self.steps[index])
+
+        if isinstance(step, dict):
+            old_id = str(step.get("id", f"step-{index + 1}")).strip()
+            new_id = f"{old_id}_copy"
+            existing = {
+                str(item.get("id", ""))
+                for item in self.steps
+                if isinstance(item, dict)
+            }
+
+            counter = 2
+            while new_id in existing:
+                new_id = f"{old_id}_copy_{counter}"
+                counter += 1
+
+            step["id"] = new_id
+
+        self.steps.insert(index + 1, step)
+
+        self.refresh()
+        self.select_index(index + 1)
 
     def selected_index(self):
         idxs = self.listbox.curselection()

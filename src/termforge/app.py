@@ -897,32 +897,32 @@ class TermForgeApp:
                 if isinstance(cmd_text, str):
                     cmd_text = self.resolve_workflow_output_vars(cmd_text)
 
-            backend_name = str(step.get("backend", "")).strip().lower()
+                backend_name = str(step.get("backend", "")).strip().lower()
 
-            if backend_name == "subprocess" and hasattr(self.backend, "run_capture"):
-                captured = self.backend.run_capture(str(cmd_text))
+                if backend_name == "subprocess" and hasattr(self.backend, "run_capture"):
+                    captured = self.backend.run_capture(str(cmd_text))
 
-                output_text = (
-                    f"STDOUT:\n{captured.get('stdout', '')}\n\n"
-                    f"STDERR:\n{captured.get('stderr', '')}\n\n"
-                    f"RETURN CODE: {captured.get('returncode')}"
-                )
+                    output_text = (
+                        f"STDOUT:\n{captured.get('stdout', '')}\n\n"
+                        f"STDERR:\n{captured.get('stderr', '')}\n\n"
+                        f"RETURN CODE: {captured.get('returncode')}"
+                    )
 
-                if captured.get("returncode") != 0:
-                    return step_id, False, "Subprocess command failed", output_text
+                    if captured.get("returncode") != 0:
+                        return step_id, False, "Subprocess command failed", output_text
 
-                if capture_variable:
-                    captured_value = captured.get("stdout", "").strip()
+                    if capture_variable:
+                        captured_value = captured.get("stdout", "").strip()
 
-                    if not hasattr(self, "workflow_output_vars"):
-                        self.workflow_output_vars = {}
+                        if not hasattr(self, "workflow_output_vars"):
+                            self.workflow_output_vars = {}
 
-                    self.workflow_output_vars[capture_variable] = captured_value
+                        self.workflow_output_vars[capture_variable] = captured_value
 
-                    if isinstance(getattr(self, "current_workflow_state", None), dict):
-                        self.current_workflow_state.setdefault("output_vars", {})[capture_variable] = captured_value
+                        if isinstance(getattr(self, "current_workflow_state", None), dict):
+                            self.current_workflow_state.setdefault("output_vars", {})[capture_variable] = captured_value
 
-                return step_id, True, "", output_text
+                    return step_id, True, "", output_text
 
                 self.run_cmd(
                     cmd_type,

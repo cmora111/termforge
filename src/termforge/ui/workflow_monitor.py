@@ -341,6 +341,15 @@ class WorkflowHistoryViewerWindow:
 
         Button(
             action_row,
+            text="Refresh",
+            width=14,
+            bg="navy",
+            fg="white",
+            command=self.force_refresh,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            action_row,
             text="Copy Selected",
             width=16,
             bg="#2f5597",
@@ -412,12 +421,24 @@ class WorkflowHistoryViewerWindow:
         self.refresh()
         self.auto_refresh()
 
+    def force_refresh(self):
+        self.snapshot = None
+        self.refresh()
+
+        try:
+            self.app.set_status(
+                f"Workflow history refreshed ({len(getattr(self.app, 'workflow_history', []))} entries)"
+            )
+        except Exception:
+            pass
+
     def refresh(self):
         new_snapshot = list(getattr(self.app, "workflow_history", []))
 
         if new_snapshot == getattr(self, "snapshot", None):
             return
 
+        self.last_selected_history_index = None
         self.snapshot = new_snapshot
 
         self.listbox.delete(0, END)
@@ -531,6 +552,12 @@ class WorkflowHistoryViewerWindow:
             return
 
         self.app.workflow_history = []
+
+        self.last_selected_history_index = None
+
+        self.details.delete("1.0", END)
+        self.details.insert("1.0", "No workflow history yet.")
+
         self.refresh()
 
     def auto_refresh(self):
