@@ -29,6 +29,14 @@ class WorkflowEditorWindow:
             relief="raised",
         ).pack(pady=(0, 8))
 
+        Label(
+            outer,
+            text=f"Editing workflow: {self.workflow_name}",
+            anchor="w",
+            bg="#eeeeee",
+            relief="sunken",
+        ).pack(fill=X, pady=(0, 8))        
+
         action_row = Frame(outer)
         action_row.pack(fill=X, pady=(0, 8))
 

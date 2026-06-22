@@ -465,10 +465,12 @@ class TermForgeApp:
         BackendOutputViewerWindow(self)
 
     def open_workflow_editor(self, workflow_name: str | None = None):
+
         workflows = self.get_workflows()
-        names = sorted(workflows.keys())
 
         if workflow_name is None:
+            names = sorted(workflows.keys())
+
             if not names:
                 self.show_traceback_window(
                     "Workflow Editor",
@@ -478,7 +480,32 @@ class TermForgeApp:
 
             workflow_name = names[0]
 
+
         WorkflowEditorWindow(self, workflow_name)
+
+#     def open_workflow_editor(self, workflow_name: str | None = None):
+#         workflows = self.get_workflows()
+# 
+#         if workflow_name is None:
+#             names = sorted(workflows.keys())
+# 
+#             if not names:
+#                 self.show_traceback_window(
+#                     "Workflow Editor",
+#                     Exception("No workflows exist yet."),
+#                 )
+#                 return
+# 
+#             workflow_name = names[0]
+# 
+#         if workflow_name not in workflows:
+#             self.show_traceback_window(
+#                 "Workflow Editor",
+#                 Exception(f"Unknown workflow: {workflow_name}"),
+#             )
+#             return
+# 
+#         WorkflowEditorWindow(self, workflow_name)
 
     def record_backend_output(self, output: dict) -> None:
         if not hasattr(self, "backend_outputs"):
@@ -2082,10 +2109,6 @@ class TermForgeApp:
 
         self.completed_jobs.insert(0, completed)
         del self.completed_jobs[50:]
-
-    def is_scheduler_paused(self) -> bool:
-        return bool(getattr(self.cfg, "SchedulerPaused", False))
-
 
     def set_scheduler_paused(self, paused: bool) -> None:
         setattr(self.cfg, "SchedulerPaused", bool(paused))
