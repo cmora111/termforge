@@ -1,5 +1,5 @@
 from tkinter import *
-from tkinter import messagebox
+from tkinter import messagebox, simpledialog
 
 
 class WorkflowPickerWindow:
@@ -41,6 +41,15 @@ class WorkflowPickerWindow:
 
         Button(
             buttons,
+            text="New Workflow",
+            width=14,
+            bg="#2f5597",
+            fg="white",
+            command=self.create_new_workflow,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            buttons,
             text="Close",
             width=14,
             bg="red",
@@ -74,4 +83,43 @@ class WorkflowPickerWindow:
         name = self.names[index]
 
         self.window.destroy()
-        self.app.open_workflow_editor(name)
+        self.app.open_workflow_editor(workflow_name=name)
+
+    def create_new_workflow(self):
+        name = simpledialog.askstring(
+            "New Workflow",
+            "Workflow name:",
+            parent=self.window,
+        )
+
+        if not name:
+            return
+
+        name = name.strip()
+
+        if not name:
+            return
+
+        workflows = getattr(self.app.cfg, "Workflows", {})
+
+        if not isinstance(workflows, dict):
+            workflows = {}
+            setattr(self.app.cfg, "Workflows", workflows)
+
+        if name in workflows:
+            messagebox.showerror(
+                "New Workflow",
+                f"Workflow already exists:\n\n{name}",
+            )
+            return
+
+        workflows[name] = []
+        setattr(self.app.cfg, "Workflows", workflows)
+
+        self.app.persist_full_config()
+        self.app.set_status(f"Created workflow: {name}")
+
+        self.refresh()
+
+        self.window.destroy()
+        self.app.open_workflow_editor(workflow_name=name)
