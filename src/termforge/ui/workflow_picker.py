@@ -32,15 +32,6 @@ class WorkflowPickerWindow:
 
         Button(
             buttons,
-            text="Open Editor",
-            width=14,
-            bg="darkgreen",
-            fg="white",
-            command=self.open_selected,
-        ).pack(side=LEFT, padx=(0, 6))
-
-        Button(
-            buttons,
             text="New Workflow",
             width=14,
             bg="#2f5597",
@@ -64,6 +55,15 @@ class WorkflowPickerWindow:
             bg="red",
             fg="white",
             command=self.delete_workflow,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            buttons,
+            text="Open Editor",
+            width=14,
+            bg="darkgreen",
+            fg="white",
+            command=self.open_selected,
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
