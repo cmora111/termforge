@@ -8,7 +8,7 @@ class WorkflowPickerWindow:
 
         self.window = Toplevel(app.root)
         self.window.title("Choose Workflow")
-        self.window.geometry("520x420")
+        self.window.geometry("850x420")
         self.window.transient(app.root)
 
         outer = Frame(self.window, padx=8, pady=8)
@@ -46,6 +46,24 @@ class WorkflowPickerWindow:
             bg="#2f5597",
             fg="white",
             command=self.create_new_workflow,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            buttons,
+            text="Rename",
+            width=14,
+            bg="#7f6000",
+            fg="white",
+            command=self.rename_workflow,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            buttons,
+            text="Delete",
+            width=14,
+            bg="red",
+            fg="white",
+            command=self.delete_workflow,
         ).pack(side=LEFT, padx=(0, 6))
 
         Button(
@@ -123,3 +141,79 @@ class WorkflowPickerWindow:
 
         self.window.destroy()
         self.app.open_workflow_editor(workflow_name=name)
+
+    def selected_workflow_name(self):
+        idxs = self.listbox.curselection()
+
+        if not idxs:
+            return None
+
+        index = idxs[0]
+
+        if index < 0 or index >= len(self.names):
+            return None
+
+        return self.names[index]
+
+    def rename_workflow(self):
+        old_name = self.selected_workflow_name()
+
+        if not old_name:
+            messagebox.showerror(
+                "Rename Workflow",
+                "Select a workflow first.",
+            )
+            return
+
+        new_name = simpledialog.askstring(
+            "Rename Workflow",
+            "New workflow name:",
+            initialvalue=old_name,
+            parent=self.window,
+        )
+
+        if not new_name:
+            return
+
+        new_name = new_name.strip()
+
+        if not new_name:
+            return
+
+        workflows = getattr(self.app.cfg, "Workflows", {})
+
+        if new_name in workflows and new_name != old_name:
+            messagebox.showerror(
+                "Rename Workflow",
+                f"Workflow already exists:\n\n{new_name}",
+            )
+            return
+
+        workflows[new_name] = workflows.pop(old_name)
+
+        self.app.persist_full_config()
+        self.refresh()
+
+    def delete_workflow(self):
+        name = self.selected_workflow_name()
+
+        if not name:
+            messagebox.showerror(
+                "Delete Workflow",
+                "Select a workflow first.",
+            )
+            return
+
+        if not messagebox.askokcancel(
+            "Delete Workflow",
+            f"Delete workflow?\n\n{name}",
+        ):
+            return
+
+        workflows = getattr(self.app.cfg, "Workflows", {})
+
+        if name in workflows:
+            del workflows[name]
+
+        self.app.persist_full_config()
+        self.refresh()
