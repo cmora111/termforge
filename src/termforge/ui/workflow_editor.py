@@ -13,7 +13,7 @@ class WorkflowEditorWindow:
 
         self.window = Toplevel(app.root)
         self.window.title(f"Workflow Editor — {workflow_name}")
-        self.window.geometry("1150x720")
+        self.window.geometry("1350x760")
         self.window.transient(app.root)
 
         outer = Frame(self.window, padx=8, pady=8)
@@ -35,10 +35,7 @@ class WorkflowEditorWindow:
             anchor="w",
             bg="#eeeeee",
             relief="sunken",
-        ).pack(fill=X, pady=(0, 8))        
-
-#        action_row = Frame(outer)
-#        action_row.pack(fill=X, pady=(0, 8))
+        ).pack(fill=X, pady=(0, 8))
 
         action_row1 = Frame(outer)
         action_row1.pack(fill=X, pady=(0, 4))
@@ -52,7 +49,7 @@ class WorkflowEditorWindow:
         Button(action_row1, text="Duplicate", width=12, bg="#3d6d3d", fg="white", command=self.duplicate_step).pack(side=LEFT, padx=(0, 6))
         Button(action_row1, text="Move Up", width=12, bg="#555555", fg="white", command=self.move_step_up).pack(side=LEFT, padx=(0, 6))
         Button(action_row1, text="Move Down", width=12, bg="#555555", fg="white", command=self.move_step_down).pack(side=LEFT, padx=(0, 6))
-        
+
         Button(action_row2, text="Load Raw", width=12, bg="#555555", fg="white", command=self.load_raw_json).pack(side=LEFT, padx=(0, 6))
         Button(action_row2, text="Apply Raw", width=12, bg="#7f6000", fg="white", command=self.apply_raw_json).pack(side=LEFT, padx=(0, 6))
         Button(action_row2, text="Save Workflow", width=16, bg="#5b4b8a", fg="white", command=self.save_workflow).pack(side=LEFT, padx=(0, 6))
@@ -62,26 +59,25 @@ class WorkflowEditorWindow:
         body.pack(fill=BOTH, expand=True)
 
         left = Frame(body)
+        middle = Frame(body)
         right = Frame(body)
 
-        body.add(left, minsize=330)
-        body.add(right, minsize=720)
+        body.add(left, minsize=280)
+        body.add(middle, minsize=420)
+        body.add(right, minsize=420)
 
-        Label(left, text="Steps", bg="#dddddd", relief="raised").pack(fill=X)
+        Label(left, text=f"Steps — {len(self.steps)}", bg="#dddddd", relief="raised").pack(fill=X)
 
         list_frame = Frame(left)
         list_frame.pack(fill=BOTH, expand=True)
 
-        self.listbox = Listbox(list_frame, width=45, exportselection=False)
+        self.listbox = Listbox(list_frame, width=38, exportselection=False)
         self.listbox.pack(side=LEFT, fill=BOTH, expand=True)
 
         scroll = Scrollbar(list_frame, command=self.listbox.yview)
         scroll.pack(side=RIGHT, fill=Y)
         self.listbox.config(yscrollcommand=scroll.set)
         self.listbox.bind("<<ListboxSelect>>", self.on_select)
-
-        form = Frame(right)
-        form.pack(fill=X)
 
         self.id_var = StringVar()
         self.backend_var = StringVar(value="subprocess")
@@ -93,10 +89,21 @@ class WorkflowEditorWindow:
         self.retry_delay_var = StringVar(value="0")
         self.capture_var = StringVar()
 
+        props = LabelFrame(
+            middle,
+            text="Step Properties",
+            padx=8,
+            pady=8,
+        )
+        props.pack(fill=X)
+
+        form = Frame(props)
+        form.pack(fill=X)
+
         row = 0
 
         Label(form, text="ID:", width=18, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.id_var, width=70).grid(row=row, column=1, sticky="ew", pady=3)
+        Entry(form, textvariable=self.id_var, width=52).grid(row=row, column=1, sticky="ew", pady=3)
         row += 1
 
         Label(form, text="Backend:", width=18, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
@@ -108,11 +115,11 @@ class WorkflowEditorWindow:
         row += 1
 
         Label(form, text="Command Text:", width=18, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.command_text_var, width=70).grid(row=row, column=1, sticky="ew", pady=3)
+        Entry(form, textvariable=self.command_text_var, width=52).grid(row=row, column=1, sticky="ew", pady=3)
         row += 1
 
         Label(form, text="Depends On:", width=18, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.depends_var, width=70).grid(row=row, column=1, sticky="ew", pady=3)
+        Entry(form, textvariable=self.depends_var, width=52).grid(row=row, column=1, sticky="ew", pady=3)
         row += 1
 
         Label(form, text="Run If:", width=18, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
@@ -120,27 +127,63 @@ class WorkflowEditorWindow:
         row += 1
 
         Label(form, text="Retry Count:", width=18, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.retry_count_var, width=70).grid(row=row, column=1, sticky="ew", pady=3)
+        Entry(form, textvariable=self.retry_count_var, width=52).grid(row=row, column=1, sticky="ew", pady=3)
         row += 1
 
         Label(form, text="Retry Delay:", width=18, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.retry_delay_var, width=70).grid(row=row, column=1, sticky="ew", pady=3)
+        Entry(form, textvariable=self.retry_delay_var, width=52).grid(row=row, column=1, sticky="ew", pady=3)
         row += 1
 
         Label(form, text="Capture Variable:", width=18, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
-        Entry(form, textvariable=self.capture_var, width=70).grid(row=row, column=1, sticky="ew", pady=3)
+        Entry(form, textvariable=self.capture_var, width=52).grid(row=row, column=1, sticky="ew", pady=3)
 
         form.columnconfigure(1, weight=1)
 
-        Label(right, text="Raw Step Preview", bg="#dddddd", relief="raised").pack(fill=X, pady=(10, 0))
+        Label(right, text="Raw Step Preview", bg="#dddddd", relief="raised").pack(fill=X)
 
-        self.preview = Text(right, wrap="word", height=16)
-        self.preview.pack(fill=BOTH, expand=True)
+        preview_frame = Frame(right)
+        preview_frame.pack(fill=BOTH, expand=True)
+
+        preview_scroll_y = Scrollbar(preview_frame)
+        preview_scroll_y.pack(side=RIGHT, fill=Y)
+
+        preview_scroll_x = Scrollbar(preview_frame, orient=HORIZONTAL)
+        preview_scroll_x.pack(side=BOTTOM, fill=X)
+
+        self.preview = Text(
+            preview_frame,
+            wrap="none",
+            height=8,
+            yscrollcommand=preview_scroll_y.set,
+            xscrollcommand=preview_scroll_x.set,
+        )
+        self.preview.pack(side=LEFT, fill=BOTH, expand=True)
+
+        preview_scroll_y.config(command=self.preview.yview)
+        preview_scroll_x.config(command=self.preview.xview)
 
         Label(right, text="Raw Workflow JSON", bg="#dddddd", relief="raised").pack(fill=X, pady=(10, 0))
 
-        self.raw_json = Text(right, wrap="none", height=10)
-        self.raw_json.pack(fill=BOTH, expand=True)
+        raw_frame = Frame(right)
+        raw_frame.pack(fill=BOTH, expand=True)
+
+        raw_scroll_y = Scrollbar(raw_frame)
+        raw_scroll_y.pack(side=RIGHT, fill=Y)
+
+        raw_scroll_x = Scrollbar(raw_frame, orient=HORIZONTAL)
+        raw_scroll_x.pack(side=BOTTOM, fill=X)
+
+        self.raw_json = Text(
+            raw_frame,
+            wrap="none",
+            height=12,
+            yscrollcommand=raw_scroll_y.set,
+            xscrollcommand=raw_scroll_x.set,
+        )
+        self.raw_json.pack(side=LEFT, fill=BOTH, expand=True)
+
+        raw_scroll_y.config(command=self.raw_json.yview)
+        raw_scroll_x.config(command=self.raw_json.xview)
 
         self.refresh()
 
@@ -154,6 +197,7 @@ class WorkflowEditorWindow:
             self.listbox.insert(END, f"{index + 1}. {step_id} [{backend}] run_if={run_if}")
 
         self.refresh_preview()
+        self.load_raw_json()
 
     def select_index(self, index):
         self.listbox.selection_clear(0, END)
@@ -178,7 +222,6 @@ class WorkflowEditorWindow:
         self.refresh()
         self.select_index(index - 1)
 
-
     def move_step_down(self):
         index = self.selected_index()
 
@@ -193,7 +236,6 @@ class WorkflowEditorWindow:
 
         self.refresh()
         self.select_index(index + 1)
-
 
     def duplicate_step(self):
         import copy
@@ -374,11 +416,12 @@ class WorkflowEditorWindow:
     def refresh_preview(self):
         try:
             step = self.build_step_from_form()
-        except Exception:
-            step = {}
+            text = pprint.pformat(step, indent=4)
+        except Exception as exc:
+            text = f"[preview unavailable]\n{exc}"
 
         self.preview.delete("1.0", END)
-        self.preview.insert("1.0", pprint.pformat(step, indent=4))
+        self.preview.insert("1.0", text)
 
     def load_raw_json(self):
         self.raw_json.delete("1.0", END)
@@ -386,7 +429,6 @@ class WorkflowEditorWindow:
             "1.0",
             json.dumps(self.steps, indent=4),
         )
-
 
     def apply_raw_json(self):
         try:
