@@ -37,17 +37,26 @@ class WorkflowEditorWindow:
             relief="sunken",
         ).pack(fill=X, pady=(0, 8))        
 
-        action_row = Frame(outer)
-        action_row.pack(fill=X, pady=(0, 8))
+#        action_row = Frame(outer)
+#        action_row.pack(fill=X, pady=(0, 8))
 
-        Button(action_row, text="Add Step", width=14, bg="darkgreen", fg="white", command=self.add_step).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Update Step", width=14, bg="#2f5597", fg="white", command=self.update_step).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Move Up", width=12, bg="#555555", fg="white", command=self.move_step_up).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Move Down", width=12, bg="#555555", fg="white", command=self.move_step_down).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Duplicate", width=12, bg="#3d6d3d", fg="white", command=self.duplicate_step).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Delete Step", width=14, bg="#7f6000", fg="white", command=self.delete_step).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Save Workflow", width=16, bg="#5b4b8a", fg="white", command=self.save_workflow).pack(side=LEFT, padx=(0, 6))
-        Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
+        action_row1 = Frame(outer)
+        action_row1.pack(fill=X, pady=(0, 4))
+
+        action_row2 = Frame(outer)
+        action_row2.pack(fill=X, pady=(0, 8))
+
+        Button(action_row1, text="Add Step", width=14, bg="darkgreen", fg="white", command=self.add_step).pack(side=LEFT, padx=(0, 6))
+        Button(action_row1, text="Update Step", width=14, bg="#2f5597", fg="white", command=self.update_step).pack(side=LEFT, padx=(0, 6))
+        Button(action_row1, text="Delete Step", width=14, bg="#7f6000", fg="white", command=self.delete_step).pack(side=LEFT, padx=(0, 6))
+        Button(action_row1, text="Duplicate", width=12, bg="#3d6d3d", fg="white", command=self.duplicate_step).pack(side=LEFT, padx=(0, 6))
+        Button(action_row1, text="Move Up", width=12, bg="#555555", fg="white", command=self.move_step_up).pack(side=LEFT, padx=(0, 6))
+        Button(action_row1, text="Move Down", width=12, bg="#555555", fg="white", command=self.move_step_down).pack(side=LEFT, padx=(0, 6))
+        
+        Button(action_row2, text="Load Raw", width=12, bg="#555555", fg="white", command=self.load_raw_json).pack(side=LEFT, padx=(0, 6))
+        Button(action_row2, text="Apply Raw", width=12, bg="#7f6000", fg="white", command=self.apply_raw_json).pack(side=LEFT, padx=(0, 6))
+        Button(action_row2, text="Save Workflow", width=16, bg="#5b4b8a", fg="white", command=self.save_workflow).pack(side=LEFT, padx=(0, 6))
+        Button(action_row2, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
 
         body = PanedWindow(outer, orient=HORIZONTAL, sashrelief=RAISED, sashwidth=6)
         body.pack(fill=BOTH, expand=True)
@@ -127,6 +136,11 @@ class WorkflowEditorWindow:
 
         self.preview = Text(right, wrap="word", height=16)
         self.preview.pack(fill=BOTH, expand=True)
+
+        Label(right, text="Raw Workflow JSON", bg="#dddddd", relief="raised").pack(fill=X, pady=(10, 0))
+
+        self.raw_json = Text(right, wrap="none", height=10)
+        self.raw_json.pack(fill=BOTH, expand=True)
 
         self.refresh()
 
@@ -365,6 +379,31 @@ class WorkflowEditorWindow:
 
         self.preview.delete("1.0", END)
         self.preview.insert("1.0", pprint.pformat(step, indent=4))
+
+    def load_raw_json(self):
+        self.raw_json.delete("1.0", END)
+        self.raw_json.insert(
+            "1.0",
+            json.dumps(self.steps, indent=4),
+        )
+
+
+    def apply_raw_json(self):
+        try:
+            steps = json.loads(self.raw_json.get("1.0", END).strip())
+
+            if not isinstance(steps, list):
+                raise ValueError("Workflow JSON must be a list of steps.")
+
+            self.steps = steps
+            self.current_index = None
+            self.clear_form()
+            self.refresh()
+
+            messagebox.showinfo("Workflow Editor", "Raw JSON applied.")
+
+        except Exception as exc:
+            messagebox.showerror("Workflow Editor", str(exc))
 
     def save_workflow(self):
         workflows = self.app.get_workflows()
