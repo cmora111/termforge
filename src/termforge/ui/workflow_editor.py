@@ -121,6 +121,8 @@ class WorkflowEditorWindow:
         Entry(form, textvariable=self.command_text_var, width=52).grid(row=row, column=1, sticky="ew", pady=3)
         row += 1
 
+        Button(form, text="Insert Variable", width=16, bg="#3d6d3d", fg="white", command=self.insert_variable,).grid(row=row, column=2, sticky="w", padx=(6, 0), pady=3)
+
         Label(form, text="Depends On:", width=18, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
         Entry(form, textvariable=self.depends_var, width=52).grid(row=row, column=1, sticky="ew", pady=3)
         row += 1
@@ -375,6 +377,90 @@ class WorkflowEditorWindow:
 
         self.steps.append(step)
         self.refresh()
+
+    def insert_variable(self):
+        names = []
+
+        runtime = getattr(self.app, "workflow_output_vars", {})
+        if isinstance(runtime, dict):
+            names.extend(runtime.keys())
+
+        shared = getattr(self.app.cfg, "SharedVariables", {})
+        if isinstance(shared, dict):
+            names.extend(shared.keys())
+
+        names = sorted(set(str(name) for name in names if str(name).strip()))
+
+        if not names:
+            messagebox.showinfo(
+                "Insert Variable",
+                "No workflow or shared variables are available.",
+            )
+            return
+
+        picker = Toplevel(self.window)
+        picker.title("Insert Variable")
+        picker.geometry("420x360")
+        picker.transient(self.window)
+
+        outer = Frame(picker, padx=8, pady=8)
+        outer.pack(fill=BOTH, expand=True)
+
+        Label(
+            outer,
+            text="Choose Variable",
+            bd=4,
+            width=28,
+            bg="lightgreen",
+            fg="black",
+            relief="raised",
+        ).pack(pady=(0, 8))
+
+        listbox = Listbox(outer, exportselection=False)
+        listbox.pack(fill=BOTH, expand=True)
+
+        for name in names:
+            listbox.insert(END, name)
+
+        def apply_selected():
+            idxs = listbox.curselection()
+            if not idxs:
+                messagebox.showerror("Insert Variable", "Select a variable first.")
+                return
+
+            name = names[idxs[0]]
+            token = f"${{{name}}}"
+
+            current = self.command_text_var.get()
+            if current and not current.endswith(" "):
+                current += " "
+
+            self.command_text_var.set(current + token)
+            self.refresh_preview()
+            picker.destroy()
+
+        buttons = Frame(outer)
+        buttons.pack(fill=X, pady=(8, 0))
+
+        Button(
+            buttons,
+            text="Insert",
+            width=14,
+            bg="darkgreen",
+            fg="white",
+            command=apply_selected,
+        ).pack(side=LEFT, padx=(0, 6))
+
+        Button(
+            buttons,
+            text="Close",
+            width=14,
+            bg="red",
+            fg="black",
+            command=picker.destroy,
+        ).pack(side=RIGHT)
+
+        listbox.bind("<Double-Button-1>", lambda _event: apply_selected())
 
     def update_step(self):
         index = self.selected_index()
