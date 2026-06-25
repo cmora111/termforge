@@ -2551,11 +2551,6 @@ class TermForgeApp:
             setattr(self.cfg, "Hotkeys", hotkeys)
         return hotkeys
 
-
-
-
-
-
     def get_disabled_plugins(self) -> list[str]:
         disabled = getattr(self.cfg, "DisabledPlugins", None)
         if disabled is None or not isinstance(disabled, list):
