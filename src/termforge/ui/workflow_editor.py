@@ -424,6 +424,31 @@ class WorkflowEditorWindow:
         self.preview.delete("1.0", END)
         self.preview.insert("1.0", text)
 
+    def save_workflow(self):
+        errors = self.app.validate_workflow(self.steps)
+
+        if errors:
+            if not messagebox.askokcancel(
+                "Workflow Validation",
+                "Workflow has problems:\n\n"
+                + "\n".join(errors)
+                + "\n\nSave anyway?",
+            ):
+                return
+
+        workflows = self.app.get_workflows()
+        workflows[self.workflow_name] = self.steps
+
+        setattr(self.app.cfg, "Workflows", workflows)
+
+        self.app.persist_full_config()
+        self.app.set_status(f"Saved workflow: {self.workflow_name}")
+
+        messagebox.showinfo(
+            "Workflow Editor",
+            f"Saved workflow: {self.workflow_name}",
+        )
+
     def validate_workflow(self):
         errors = self.app.validate_workflow(self.steps)
 
@@ -462,14 +487,3 @@ class WorkflowEditorWindow:
 
         except Exception as exc:
             messagebox.showerror("Workflow Editor", str(exc))
-
-    def save_workflow(self):
-        workflows = self.app.get_workflows()
-        workflows[self.workflow_name] = self.steps
-
-        setattr(self.app.cfg, "Workflows", workflows)
-
-        self.app.persist_full_config()
-        self.app.set_status(f"Saved workflow: {self.workflow_name}")
-
-        messagebox.showinfo("Workflow Editor", f"Saved workflow: {self.workflow_name}")
