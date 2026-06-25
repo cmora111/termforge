@@ -54,6 +54,7 @@ class WorkflowEditorWindow:
         Button(action_row2, text="Validate", width=12, bg="navy", fg="white", command=self.validate_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row2, text="Apply Raw", width=12, bg="#7f6000", fg="white", command=self.apply_raw_json).pack(side=LEFT, padx=(0, 6))
         Button(action_row2, text="Run", width=12, bg="#3d6d3d", fg="white", command=self.run_workflow).pack(side=LEFT, padx=(0, 6))
+        Button(action_row2, text="Run Step", width=12, bg="#2f5597", fg="white", command=self.run_selected_step).pack(side=LEFT, padx=(0, 6))
         Button(action_row2, text="Save Workflow", width=16, bg="#5b4b8a", fg="white", command=self.save_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row2, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
 
@@ -469,6 +470,56 @@ class WorkflowEditorWindow:
         except Exception as exc:
             self.app.show_traceback_window(
                 f"Run Workflow Failed: {self.workflow_name}",
+                exc,
+            )
+
+    def run_selected_step(self):
+        index = self.selected_index()
+
+        if index is None:
+            messagebox.showerror("Workflow Editor", "Select a step first.")
+            return
+
+        try:
+            self.update_step()
+        except Exception:
+            return
+
+        step = self.steps[index]
+        step_id = str(step.get("id", f"step-{index + 1}"))
+
+        try:
+            self.app.start_workflow_state(
+                f"{self.workflow_name}/{step_id}",
+                1,
+                mode="single-step",
+            )
+
+            step_id, ok, error, output = self.app.run_workflow_step(
+                self.workflow_name,
+                step,
+            )
+
+            if ok:
+                self.app.update_workflow_step_state(
+                    step_id,
+                    "success",
+                    "Step completed",
+                    output=output,
+                )
+                messagebox.showinfo("Run Step", f"Step completed:\n\n{step_id}")
+            else:
+                self.app.update_workflow_step_state(
+                    step_id,
+                    "failed",
+                    error,
+                    output=output,
+                )
+                messagebox.showerror("Run Step", f"Step failed:\n\n{error}")
+
+        except Exception as exc:
+            self.app.show_traceback_window(
+                f"Run Step Failed: {self.workflow_name}/{step_id}",
                 exc,
             )
 
