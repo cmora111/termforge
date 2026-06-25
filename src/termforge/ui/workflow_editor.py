@@ -53,6 +53,7 @@ class WorkflowEditorWindow:
         Button(action_row2, text="Load Raw", width=12, bg="#555555", fg="white", command=self.load_raw_json).pack(side=LEFT, padx=(0, 6))
         Button(action_row2, text="Validate", width=12, bg="navy", fg="white", command=self.validate_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row2, text="Apply Raw", width=12, bg="#7f6000", fg="white", command=self.apply_raw_json).pack(side=LEFT, padx=(0, 6))
+        Button(action_row2, text="Run", width=12, bg="#3d6d3d", fg="white", command=self.run_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row2, text="Save Workflow", width=16, bg="#5b4b8a", fg="white", command=self.save_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row2, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
 
@@ -448,6 +449,28 @@ class WorkflowEditorWindow:
             "Workflow Editor",
             f"Saved workflow: {self.workflow_name}",
         )
+
+    def run_workflow(self):
+        errors = self.app.validate_workflow(self.steps)
+
+        if errors:
+            if not messagebox.askokcancel(
+                "Run Workflow",
+                "Workflow has problems:\n\n"
+                + "\n".join(errors)
+                + "\n\nRun anyway?",
+            ):
+                return
+
+        self.save_workflow()
+
+        try:
+            self.app.run_workflow(self.workflow_name, source="workflow_editor")
+        except Exception as exc:
+            self.app.show_traceback_window(
+                f"Run Workflow Failed: {self.workflow_name}",
+                exc,
+            )
 
     def validate_workflow(self):
         errors = self.app.validate_workflow(self.steps)
