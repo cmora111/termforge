@@ -10,6 +10,8 @@ class WorkflowEditorWindow:
         self.workflow_name = workflow_name
         self.steps = list(app.get_workflows().get(workflow_name, []))
         self.current_index = None
+        self.filter_var = StringVar()
+        self.filtered_indexes = []
 
         self.window = Toplevel(app.root)
         self.window.title(f"Workflow Editor — {workflow_name}")
@@ -73,6 +75,25 @@ class WorkflowEditorWindow:
 
         list_frame = Frame(left)
         list_frame.pack(fill=BOTH, expand=True)
+
+        filter_row = Frame(left)
+        filter_row.pack(fill=X, pady=(0, 6))
+
+        Label(filter_row, text="Filter:", width=8, anchor="w").pack(side=LEFT)
+
+        Entry(
+            filter_row,
+            textvariable=self.filter_var,
+        ).pack(side=LEFT, fill=X, expand=True)
+
+        Button(
+            filter_row,
+            text="Clear",
+            width=8,
+            command=self.clear_filter,
+        ).pack(side=RIGHT, padx=(6, 0))
+
+        self.filter_var.trace_add("write", lambda *_args: self.refresh())
 
         self.listbox = Listbox(list_frame, width=38, exportselection=False)
         self.listbox.pack(side=LEFT, fill=BOTH, expand=True)
@@ -194,21 +215,51 @@ class WorkflowEditorWindow:
 
     def refresh(self):
         self.listbox.delete(0, END)
+        self.filtered_indexes = []
+
+        needle = self.filter_var.get().strip().lower()
 
         for index, step in enumerate(self.steps):
-            step_id = step.get("id", f"step-{index + 1}") if isinstance(step, dict) else f"step-{index + 1}"
-            run_if = step.get("run_if", "") if isinstance(step, dict) else ""
-            backend = step.get("backend", "") if isinstance(step, dict) else ""
-            self.listbox.insert(END, f"{index + 1}. {step_id} [{backend}] run_if={run_if}")
+            if isinstance(step, dict):
+                step_id = str(step.get("id", f"step-{index + 1}"))
+                run_if = str(step.get("run_if", ""))
+                backend = str(step.get("backend", ""))
+                command = str(step.get("command", ""))
+                depends = str(step.get("depends_on", ""))
+                haystack = " ".join([step_id, run_if, backend, command, depends]).lower()
+            else:
+                step_id = f"step-{index + 1}"
+                run_if = ""
+                backend = ""
+                haystack = str(step).lower()
+
+            if needle and needle not in haystack:
+                continue
+
+            self.filtered_indexes.append(index)
+
+            self.listbox.insert(
+                END,
+                f"{index + 1}. {step_id} [{backend}] run_if={run_if}",
+            )
 
         self.refresh_preview()
         self.load_raw_json()
 
     def select_index(self, index):
+        if index not in self.filtered_indexes:
+            self.filter_var.set("")
+            self.refresh()
+
+        if index not in self.filtered_indexes:
+            return
+
+        list_index = self.filtered_indexes.index(index)
+
         self.listbox.selection_clear(0, END)
-        self.listbox.selection_set(index)
-        self.listbox.activate(index)
-        self.listbox.see(index)
+        self.listbox.selection_set(list_index)
+        self.listbox.activate(list_index)
+        self.listbox.see(list_index)
         self.on_select()
 
 
@@ -279,11 +330,12 @@ class WorkflowEditorWindow:
         if not idxs:
             return None
 
-        index = idxs[0]
-        if index < 0 or index >= len(self.steps):
+        list_index = idxs[0]
+
+        if list_index < 0 or list_index >= len(self.filtered_indexes):
             return None
 
-        return index
+        return self.filtered_indexes[list_index]
 
     def on_select(self, _event=None):
         index = self.selected_index()
@@ -489,6 +541,10 @@ class WorkflowEditorWindow:
         del self.steps[index]
         self.current_index = None
         self.clear_form()
+        self.refresh()
+
+    def clear_filter(self):
+        self.filter_var.set("")
         self.refresh()
 
     def clear_form(self):
