@@ -480,32 +480,7 @@ class TermForgeApp:
 
             workflow_name = names[0]
 
-
         WorkflowEditorWindow(self, workflow_name)
-
-#     def open_workflow_editor(self, workflow_name: str | None = None):
-#         workflows = self.get_workflows()
-# 
-#         if workflow_name is None:
-#             names = sorted(workflows.keys())
-# 
-#             if not names:
-#                 self.show_traceback_window(
-#                     "Workflow Editor",
-#                     Exception("No workflows exist yet."),
-#                 )
-#                 return
-# 
-#             workflow_name = names[0]
-# 
-#         if workflow_name not in workflows:
-#             self.show_traceback_window(
-#                 "Workflow Editor",
-#                 Exception(f"Unknown workflow: {workflow_name}"),
-#             )
-#             return
-# 
-#         WorkflowEditorWindow(self, workflow_name)
 
     def record_backend_output(self, output: dict) -> None:
         if not hasattr(self, "backend_outputs"):
@@ -890,10 +865,17 @@ class TermForgeApp:
         step_id = str(step.get("id", "")).strip()
         backend_ctx = self.snapshot_backend_context()
 
+        backend_name = str(step.get("backend", "")).strip().lower()
+        is_subprocess_step = backend_name == "subprocess"
+
+        after_output = ""
+
         try:
             self.apply_backend_override(step)
 
-            before_output = self.capture_backend_output(lines=80)
+            before_output = ""
+            if not is_subprocess_step:
+                before_output = self.capture_backend_output(lines=80)
 
             environment = step.get("environment", "")
             profile = step.get("profile", "")
@@ -909,11 +891,10 @@ class TermForgeApp:
             if isinstance(command, str):
                 command = self.resolve_workflow_output_vars(command)
 
-                if isinstance(command, str):
-                    if "/" not in command:
-                        raise TermForgeError(
-                            f"Workflow command string must be Category/Command: {command}"
-                        )
+                if "/" not in command:
+                    raise TermForgeError(
+                        f"Workflow command string must be Category/Command: {command}"
+                    )
 
                 category, cmd_name = command.split("/", 1)
                 self.select_cmd(None, category, cmd_name)
@@ -924,10 +905,13 @@ class TermForgeApp:
                 if isinstance(cmd_text, str):
                     cmd_text = self.resolve_workflow_output_vars(cmd_text)
 
-                backend_name = str(step.get("backend", "")).strip().lower()
+                if is_subprocess_step:
+                    backend = self.backend
 
-                if backend_name == "subprocess" and hasattr(self.backend, "run_capture"):
-                    captured = self.backend.run_capture(str(cmd_text))
+                    if not hasattr(backend, "run_capture"):
+                        backend = SubprocessBackend(self)
+
+                    captured = backend.run_capture(str(cmd_text))
 
                     output_text = (
                         f"STDOUT:\n{captured.get('stdout', '')}\n\n"
@@ -936,18 +920,16 @@ class TermForgeApp:
                     )
 
                     if captured.get("returncode") != 0:
-                        return step_id, False, "Subprocess command failed", output_text
+                        return (
+                            step_id,
+                            False,
+                            f"Subprocess command failed with return code {captured.get('returncode')}",
+                            output_text,
+                        )
 
                     if capture_variable:
                         captured_value = captured.get("stdout", "").strip()
-
-                        if not hasattr(self, "workflow_output_vars"):
-                            self.workflow_output_vars = {}
-
-                        self.workflow_output_vars[capture_variable] = captured_value
-
-                        if isinstance(getattr(self, "current_workflow_state", None), dict):
-                            self.current_workflow_state.setdefault("output_vars", {})[capture_variable] = captured_value
+                        self.set_workflow_output_var(capture_variable, captured_value)
 
                     return step_id, True, "", output_text
 
@@ -964,10 +946,15 @@ class TermForgeApp:
                     f"Invalid workflow command for step {step_id}: {command!r}"
                 )
 
-            after_output = self.capture_backend_output(lines=120)
+            if not is_subprocess_step:
+                after_output = self.capture_backend_output(lines=120)
 
             if capture_variable:
-                captured_value = after_output.strip().splitlines()[-1] if after_output.strip() else ""
+                captured_value = (
+                    after_output.strip().splitlines()[-1]
+                    if after_output.strip()
+                    else ""
+                )
                 self.set_workflow_output_var(capture_variable, captured_value)
 
                 self.log(
@@ -975,12 +962,17 @@ class TermForgeApp:
                     f"{capture_variable}={captured_value!r}"
                 )
 
-            after_output = self.capture_backend_output(lines=120)
-
             return step_id, True, "", after_output
 
         except Exception as exc:
-            after_output = self.capture_backend_output(lines=120)
+            if is_subprocess_step:
+                after_output = str(exc)
+            else:
+                try:
+                    after_output = self.capture_backend_output(lines=120)
+                except Exception:
+                    after_output = str(exc)
+
             return step_id, False, str(exc), after_output
 
         finally:
@@ -1444,6 +1436,11 @@ class TermForgeApp:
                 )
                 continue
 
+            ok = False
+            error = ""
+            output = ""
+            last_result = None
+
             try:
                 self.update_workflow_step_state(
                     step_id,
@@ -1461,7 +1458,6 @@ class TermForgeApp:
                 retry_delay = int(step.get("retry_delay", 0) or 0)
 
                 attempt = 0
-                last_result = None
 
                 while True:
                     attempt += 1
@@ -1514,6 +1510,14 @@ class TermForgeApp:
                 else:
                     failed.add(step_id)
                     results[step_id] = False
+
+                    self.update_workflow_step_state(
+                        step_id,
+                        "failed",
+                        error,
+                        output=output,
+                    )
+
                     raise TermForgeError(error)
 
             except Exception as exc:
@@ -1524,19 +1528,26 @@ class TermForgeApp:
                     f"Workflow step failed: {step_id}: {exc}"
                 )
 
+                failure_output = ""
+
+                if "output" in locals() and output:
+                    failure_output = output
+
+                elif "last_result" in locals() and last_result:
+                    try:
+                        failure_output = last_result[3] or ""
+                    except Exception:
+                        failure_output = ""
+
+                if not failure_output:
+                    failure_output = str(exc)
+
                 self.update_workflow_step_state(
                     step_id,
                     "failed",
                     str(exc),
-                    output=self.capture_backend_output(lines=120),
+                    output=failure_output,
                 )
-
-                self.show_traceback_window(
-                    f"Workflow Step Failed: {name}/{step_id}",
-                    exc,
-                )
-
-                continue
 
         self.add_history_entry(
             "workflow",

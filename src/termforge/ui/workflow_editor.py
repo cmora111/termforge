@@ -10,9 +10,11 @@ class WorkflowEditorWindow:
         self.workflow_name = workflow_name
         self.steps = list(app.get_workflows().get(workflow_name, []))
         self.current_index = None
+        self.dirty = False
 
         self.window = Toplevel(app.root)
         self.window.title(f"Workflow Editor — {workflow_name}")
+        self.set_title()
         self.window.geometry("1350x760")
         self.window.transient(app.root)
 
@@ -30,7 +32,6 @@ class WorkflowEditorWindow:
         ).pack(pady=(0, 8))
 
         Label(
-            outer,
             text=f"Editing workflow: {self.workflow_name}",
             anchor="w",
             bg="#eeeeee",
@@ -56,7 +57,7 @@ class WorkflowEditorWindow:
         Button(action_row2, text="Run", width=12, bg="#3d6d3d", fg="white", command=self.run_workflow).pack(side=LEFT, padx=(0, 6))
         Button(action_row2, text="Run Step", width=12, bg="#2f5597", fg="white", command=self.run_selected_step).pack(side=LEFT, padx=(0, 6))
         Button(action_row2, text="Save Workflow", width=16, bg="#5b4b8a", fg="white", command=self.save_workflow).pack(side=LEFT, padx=(0, 6))
-        Button(action_row2, text="Close", width=14, bg="red", fg="black", command=self.window.destroy).pack(side=RIGHT)
+        Button(action_row2, text="Close", width=14, bg="red", fg="black", command=self.close_window).pack(side=RIGHT)
 
         body = PanedWindow(outer, orient=HORIZONTAL, sashrelief=RAISED, sashwidth=6)
         body.pack(fill=BOTH, expand=True)
@@ -226,6 +227,7 @@ class WorkflowEditorWindow:
 
         self.refresh()
         self.select_index(index - 1)
+        self.mark_dirty()
 
     def move_step_down(self):
         index = self.selected_index()
@@ -241,6 +243,7 @@ class WorkflowEditorWindow:
 
         self.refresh()
         self.select_index(index + 1)
+        self.mark_dirty()
 
     def duplicate_step(self):
         import copy
@@ -273,6 +276,7 @@ class WorkflowEditorWindow:
 
         self.refresh()
         self.select_index(index + 1)
+        self.mark_dirty()
 
     def selected_index(self):
         idxs = self.listbox.curselection()
@@ -377,6 +381,7 @@ class WorkflowEditorWindow:
 
         self.steps.append(step)
         self.refresh()
+        self.mark_dirty()
 
     def insert_variable(self):
         names = []
@@ -478,6 +483,7 @@ class WorkflowEditorWindow:
         self.steps[index] = step
         self.refresh()
         self.listbox.selection_set(index)
+        self.mark_dirty()
 
     def delete_step(self):
         index = self.selected_index()
@@ -490,6 +496,7 @@ class WorkflowEditorWindow:
         self.current_index = None
         self.clear_form()
         self.refresh()
+        self.mark_dirty()
 
     def clear_form(self):
         self.id_var.set("")
@@ -512,7 +519,34 @@ class WorkflowEditorWindow:
         self.preview.delete("1.0", END)
         self.preview.insert("1.0", text)
 
+    def set_title(self):
+        suffix = " *UNSAVED*" if self.dirty else ""
+        self.window.title(f"Workflow Editor — {self.workflow_name}{suffix}")
+
+
+    def mark_dirty(self):
+        self.dirty = True
+        self.set_title()
+
+
+    def mark_clean(self):
+        self.dirty = False
+        self.set_title()
+
+
+    def close_window(self):
+        if self.dirty:
+            if not messagebox.askokcancel(
+                "Unsaved Changes",
+                "This workflow has unsaved changes.\n\nClose anyway?",
+            ):
+                return
+
+        self.window.destroy()
+
     def save_workflow(self):
+        self.dirty = False
+        self.window.title(f"Workflow Editor — {self.workflow_name}")
         errors = self.app.validate_workflow(self.steps)
 
         if errors:
@@ -530,6 +564,7 @@ class WorkflowEditorWindow:
         setattr(self.app.cfg, "Workflows", workflows)
 
         self.app.persist_full_config()
+        self.mark_clean()
         self.app.set_status(f"Saved workflow: {self.workflow_name}")
 
         messagebox.showinfo(
@@ -647,3 +682,5 @@ class WorkflowEditorWindow:
 
         except Exception as exc:
             messagebox.showerror("Workflow Editor", str(exc))
+
+        self.mark_dirty()
