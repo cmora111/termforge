@@ -17,6 +17,7 @@ class WorkflowEditorWindow:
         self.set_title()
         self.window.geometry("1350x760")
         self.window.transient(app.root)
+        self.window.protocol("WM_DELETE_WINDOW", self.close_window)
 
         outer = Frame(self.window, padx=8, pady=8)
         outer.pack(fill=BOTH, expand=True)
@@ -32,6 +33,7 @@ class WorkflowEditorWindow:
         ).pack(pady=(0, 8))
 
         Label(
+            outer,
             text=f"Editing workflow: {self.workflow_name}",
             anchor="w",
             bg="#eeeeee",
@@ -70,7 +72,14 @@ class WorkflowEditorWindow:
         body.add(middle, minsize=420)
         body.add(right, minsize=420)
 
-        Label(left, text=f"Steps — {len(self.steps)}", bg="#dddddd", relief="raised").pack(fill=X)
+        self.step_count_var = StringVar()
+
+        Label(
+            left,
+            textvariable=self.step_count_var,
+            bg="#dddddd",
+            relief="raised",
+        ).pack(fill=X)
 
         list_frame = Frame(left)
         list_frame.pack(fill=BOTH, expand=True)
@@ -114,15 +123,31 @@ class WorkflowEditorWindow:
         OptionMenu(form, self.backend_var, "", "x11", "subprocess", "tmux").grid(row=row, column=1, sticky="ew", pady=3)
         row += 1
 
+        Label(
+            form,
+            text="subprocess = clean stdout/stderr capture\n"
+                 "tmux = pane automation / scrollback capture",
+            fg="#555555",
+            justify=LEFT,
+            anchor="w",
+        ).grid(row=row, column=1, columnspan=2, sticky="ew", pady=(0, 4))
+        row += 1
+
         Label(form, text="Command Type:", width=18, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
         OptionMenu(form, self.command_type_var, "1", "2", "3").grid(row=row, column=1, sticky="ew", pady=3)
         row += 1
 
         Label(form, text="Command Text:", width=18, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
         Entry(form, textvariable=self.command_text_var, width=52).grid(row=row, column=1, sticky="ew", pady=3)
+        Button(
+            form,
+            text="Insert Variable",
+            width=16,
+            bg="#3d6d3d",
+            fg="white",
+            command=self.insert_variable,
+        ).grid(row=row, column=2, sticky="w", padx=(6, 0), pady=3)
         row += 1
-
-        Button(form, text="Insert Variable", width=16, bg="#3d6d3d", fg="white", command=self.insert_variable,).grid(row=row, column=2, sticky="w", padx=(6, 0), pady=3)
 
         Label(form, text="Depends On:", width=18, anchor="w").grid(row=row, column=0, sticky="w", pady=3)
         Entry(form, textvariable=self.depends_var, width=52).grid(row=row, column=1, sticky="ew", pady=3)
@@ -144,6 +169,28 @@ class WorkflowEditorWindow:
         Entry(form, textvariable=self.capture_var, width=52).grid(row=row, column=1, sticky="ew", pady=3)
 
         form.columnconfigure(1, weight=1)
+
+        self.backend_warning_frame = LabelFrame(
+            props,
+            text="Backend Warning",
+            fg="red",
+            padx=8,
+            pady=6,
+        )
+
+        self.backend_warning_label = Label(
+            self.backend_warning_frame,
+            text="",
+            fg="red",
+            bg=self.backend_warning_frame.cget("bg"),
+            justify=LEFT,
+            anchor="w",
+            wraplength=360,
+        )
+        self.backend_warning_label.pack(fill=X)
+
+        self.backend_var.trace_add("write", lambda *_args: self.update_backend_warning())
+        self.capture_var.trace_add("write", lambda *_args: self.update_backend_warning())
 
         Label(right, text="Raw Step Preview", bg="#dddddd", relief="raised").pack(fill=X)
 
@@ -192,6 +239,7 @@ class WorkflowEditorWindow:
         raw_scroll_x.config(command=self.raw_json.xview)
 
         self.refresh()
+        self.update_backend_warning()
 
     def refresh(self):
         self.listbox.delete(0, END)
@@ -204,6 +252,7 @@ class WorkflowEditorWindow:
 
         self.refresh_preview()
         self.load_raw_json()
+        self.update_step_count()
 
     def select_index(self, index):
         self.listbox.selection_clear(0, END)
@@ -212,6 +261,18 @@ class WorkflowEditorWindow:
         self.listbox.see(index)
         self.on_select()
 
+    def update_step_count(self):
+        total = len(self.steps)
+        shown = len(getattr(self, "filtered_indexes", []))
+
+        if getattr(self, "filter_var", None) and self.filter_var.get().strip():
+            self.step_count_var.set(
+                f"Steps — {shown} shown / {total} total"
+            )
+        else:
+            self.step_count_var.set(
+                f"Steps — {total}"
+            )
 
     def move_step_up(self):
         index = self.selected_index()
@@ -326,6 +387,7 @@ class WorkflowEditorWindow:
         self.capture_var.set(str(step.get("capture_variable", "")))
 
         self.refresh_preview()
+        self.update_backend_warning()
 
     def build_step_from_form(self):
         step_id = self.id_var.get().strip()
@@ -382,6 +444,24 @@ class WorkflowEditorWindow:
         self.steps.append(step)
         self.refresh()
         self.mark_dirty()
+
+    def update_backend_warning(self):
+        backend = self.backend_var.get().strip().lower()
+        capture = self.capture_var.get().strip()
+
+        if backend == "tmux" and capture:
+            self.backend_warning_label.config(
+                text=(
+                    "⚠ tmux + capture_variable captures terminal scrollback.\n"
+                    "Use subprocess for clean stdout/stderr variable capture."
+                )
+            )
+
+            if not self.backend_warning_frame.winfo_ismapped():
+                self.backend_warning_frame.pack(fill=X, pady=(8, 0))
+        else:
+            self.backend_warning_label.config(text="")
+            self.backend_warning_frame.pack_forget()
 
     def insert_variable(self):
         names = []

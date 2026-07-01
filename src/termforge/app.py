@@ -95,6 +95,7 @@ import shutil
 import html
 import webbrowser
 import shlex
+import socket
 from datetime import datetime
 from pathlib import Path
 
@@ -452,6 +453,69 @@ class TermForgeApp:
         finally:
             self.root.destroy()
 
+    def get_builtin_variables(self) -> dict:
+        now = datetime.now()
+
+        return {
+            "HOME": os.path.expanduser("~"),
+            "PWD": os.getcwd(),
+            "USER": os.environ.get("USER", ""),
+            "HOSTNAME": socket.gethostname(),
+            "DATE": now.strftime("%Y-%m-%d"),
+            "TIME": now.strftime("%H:%M:%S"),
+            "TIMESTAMP": now.strftime("%Y-%m-%d_%H-%M-%S"),
+        }
+
+
+    def get_all_variables(self) -> dict:
+        data = {}
+
+        builtins = self.get_builtin_variables()
+        shared = getattr(self.cfg, "SharedVariables", {})
+        workflow = getattr(self, "workflow_output_vars", {})
+
+        if isinstance(builtins, dict):
+            data.update(builtins)
+
+        if isinstance(shared, dict):
+            data.update(shared)
+
+        if isinstance(workflow, dict):
+            data.update(workflow)
+
+        return data
+
+
+    def resolve_variable_value(self, value: str, seen: set | None = None) -> str:
+        if seen is None:
+            seen = set()
+
+        variables = self.get_all_variables()
+
+        def replace(match):
+            name = match.group(1).strip()
+
+            if name in seen:
+                raise TermForgeError(
+                    "Circular variable reference: "
+                    + " -> ".join(list(seen) + [name])
+                )
+
+            if name not in variables:
+                return match.group(0)
+
+            seen.add(name)
+            resolved = self.resolve_variable_value(str(variables[name]), seen)
+            seen.remove(name)
+
+            return resolved
+
+        return re.sub(r"\$\{([^}]+)\}", replace, str(value))
+
+
+    def resolve_text_variables(self, text: str) -> str:
+        return self.resolve_variable_value(str(text))
+
     def open_settings(self):
         SettingsWindow(self)
 
@@ -591,7 +655,6 @@ class TermForgeApp:
 
         return self.current_workflow_state.setdefault("output_vars", {})
 
-
     def set_workflow_output_var(self, name: str, value: str) -> None:
         name = str(name).strip()
 
@@ -602,10 +665,7 @@ class TermForgeApp:
         output_vars[name] = value
 
     def resolve_workflow_output_vars(self, text: str) -> str:
-        return resolve_workflow_variables(
-            text,
-            self.get_workflow_output_vars(),
-        )
+        return self.resolve_text_variables(text)
 
     def snapshot_backend_context(self) -> dict:
         return {
@@ -615,7 +675,6 @@ class TermForgeApp:
             "tmux_mode": getattr(self.cfg, "TmuxMode", "pane"),
             "current_environment": self.get_current_environment(),
         }
-
 
     def restore_backend_context(self, ctx: dict) -> None:
         setattr(self.cfg, "Backend", ctx.get("backend", "x11"))
@@ -902,8 +961,12 @@ class TermForgeApp:
             elif isinstance(command, (list, tuple)):
                 cmd_type, cmd_text, options = parse_command_entry(command)
 
+                cmd_text = self.resolve_text_variables(str(cmd_text))
+
                 if isinstance(cmd_text, str):
                     cmd_text = self.resolve_workflow_output_vars(cmd_text)
+
+                    print("DEBUG resolved cmd_text:", repr(cmd_text), flush=True)
 
                 if is_subprocess_step:
                     backend = self.backend
@@ -1773,7 +1836,6 @@ class TermForgeApp:
             "message": "Window exists." if exists else "Window is not available.",
         }
 
-
     def validate_all_window_profiles(self) -> list[dict]:
         profiles = self.get_window_profiles()
         return [
@@ -2067,17 +2129,14 @@ class TermForgeApp:
     def is_execution_queue_paused(self) -> bool:
         return bool(getattr(self, "execution_queue_paused", False))
 
-
     def pause_execution_queue(self) -> None:
         self.execution_queue_paused = True
         self.set_status("Execution queue paused.")
-
 
     def resume_execution_queue(self) -> None:
         self.execution_queue_paused = False
         self.set_status("Execution queue resumed.")
         self.root.after(10, self.process_execution_queue)
-
 
     def toggle_execution_queue_pause(self) -> None:
         if self.is_execution_queue_paused():
@@ -2091,7 +2150,6 @@ class TermForgeApp:
             history = []
             setattr(self.cfg, "ExecutionHistory", history)
         return history
-
 
     def add_execution_history(self, job: dict, status: str, error: str = "") -> None:
         history = self.get_execution_history()
@@ -2129,14 +2187,11 @@ class TermForgeApp:
         self.set_status(f"Scheduler: {state}")
         self.log(f"Scheduler {state.lower()}.")
 
-
     def pause_scheduler(self) -> None:
         self.set_scheduler_paused(True)
 
-
     def resume_scheduler(self) -> None:
         self.set_scheduler_paused(False)
-
 
     def toggle_scheduler(self) -> None:
         self.set_scheduler_paused(not self.is_scheduler_paused())
@@ -2167,7 +2222,6 @@ class TermForgeApp:
         )
 
         self.root.after(10, self.process_execution_queue)
-
 
     def process_execution_queue(self) -> None:
         if self.is_execution_queue_paused():
@@ -2229,7 +2283,6 @@ class TermForgeApp:
 
             if self.execution_queue:
                 self.root.after(100, self.process_execution_queue)
-
 
     def get_backup_dir(self) -> Path:
         backup_dir = Path(getattr(self.cfg, "BackupDir", CONFIG_DIR / "backups"))
@@ -2337,14 +2390,11 @@ class TermForgeApp:
         self.set_status(f"Scheduler: {state}")
         self.log(f"Scheduler {state.lower()}.")
 
-
     def pause_scheduler(self) -> None:
         self.set_scheduler_paused(True)
 
-
     def resume_scheduler(self) -> None:
         self.set_scheduler_paused(False)
-
 
     def toggle_scheduler(self) -> None:
         self.set_scheduler_paused(not self.is_scheduler_paused())
@@ -2367,10 +2417,8 @@ class TermForgeApp:
             setattr(self.cfg, "Tags", tags)
         return tags
 
-
     def command_key(self, category: str, name: str) -> str:
         return f"{category}/{name}"
-
 
     def get_command_tags(self, category: str, name: str) -> list[str]:
         tags = self.get_tags()
@@ -2378,7 +2426,6 @@ class TermForgeApp:
         if not isinstance(value, list):
             return []
         return [str(tag).strip() for tag in value if str(tag).strip()]
-
 
     def set_command_tags(self, category: str, name: str, tag_text: str) -> None:
         tags = self.get_tags()
@@ -2462,13 +2509,11 @@ class TermForgeApp:
         ]
         return any(pattern in cmd_lower for pattern in dangerous_patterns)
 
-
     def confirm_dangerous_command(self, cmd: str) -> bool:
         return messagebox.askokcancel(
             "Dangerous Command",
             f"This command may be dangerous:\n\n{cmd}\n\nContinue?"
         )
-
 
     def get_chain_templates(self) -> dict:
         templates = getattr(self.cfg, "ChainTemplates", {})
@@ -2476,7 +2521,6 @@ class TermForgeApp:
             templates = {}
             setattr(self.cfg, "ChainTemplates", templates)
         return templates
-
 
     def persist_chain_templates(self) -> None:
         self.persist_full_config()
@@ -2552,8 +2596,6 @@ class TermForgeApp:
             windows = {}
             setattr(self.cfg, "Windows", windows)
         return windows
-
-
 
     def get_hotkeys_dict(self) -> dict:
         hotkeys = getattr(self.cfg, "Hotkeys", None)
@@ -3006,12 +3048,10 @@ class TermForgeApp:
 
         return names
 
-
     def substitute_chain_vars(self, text: str, values: dict[str, str]) -> str:
         for key, value in values.items():
             text = text.replace(f"<{key}>", value)
         return text
-
 
     def substitute_step_vars(self, step, values: dict[str, str]):
         if not isinstance(step, (list, tuple)):
@@ -3408,7 +3448,6 @@ class TermForgeApp:
             setattr(self.cfg, "Schedules", schedules)
         return schedules
 
-
     def run_scheduled_command(self, schedule: dict) -> None:
         from datetime import datetime
 
@@ -3589,7 +3628,6 @@ class TermForgeApp:
         # run again in 30 seconds
         self.root.after(30_000, self.scheduler_tick)
 
-
     def start_scheduler(self) -> None:
         self.run_startup_schedules()
         self.root.after(30_000, self.scheduler_tick)
@@ -3602,7 +3640,6 @@ class TermForgeApp:
         self.add_usage(category, subcategory)
 
         self.run_cmd(cmd_type, cmd, options, parent_window)
-
 
     def category_matches_search(self, category: str, query: str) -> bool:
         if not query:
@@ -3730,17 +3767,14 @@ class TermForgeApp:
             setattr(self.cfg, "Usage", usage)
         return usage
 
-
     def add_usage(self, category: str, command: str) -> None:
         usage = self.get_usage()
         key = f"{category}/{command}"
         usage[key] = int(usage.get(key, 0)) + 1
         self.persist_full_config()
 
-
     def parse_command_entry_public(self, entry):
         return parse_command_entry(entry)
-
 
     def export_config_backup(self) -> None:
         try:
@@ -3767,7 +3801,6 @@ class TermForgeApp:
 
         except Exception as exc:
             self.show_traceback_window("Export Config", exc)
-
 
     def import_config_backup(self) -> None:
         try:
@@ -4187,7 +4220,6 @@ class TermForgeApp:
 
         Button(win, text="Close", width=28, bg="red", fg="black", command=win.destroy).pack(pady=(8, 8))
 
-
 def main() -> int:
     ensure_user_config()
     cfg = load_config()
@@ -4195,7 +4227,6 @@ def main() -> int:
     TermForgeApp(root, cfg)
     root.mainloop()
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
