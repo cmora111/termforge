@@ -229,6 +229,7 @@ class TermForgeApp:
         self.debug = bool(getattr(cfg, "debug", {}).get("Flag", False))
         self.application = getattr(cfg, "terminal", {}).get("application", "gnome-terminal")
         self.status_var = StringVar(value="Ready.")
+        self.target_var = StringVar(value="Target: (none)")
         self.search_var = StringVar()
         self.category_buttons: dict[str, Button] = {}
         self.hotkey_listener = None
@@ -249,7 +250,7 @@ class TermForgeApp:
         self.workflow_history = []
         self.workflow_output_vars = {}
         self.variable_prompt_cache = {}
-
+        self.gnome_selected_window = None
         self.backend = self.create_backend()
 
         try:
@@ -405,12 +406,37 @@ class TermForgeApp:
         self.status_var.set(message)
         self.log(message)
 
+    def refresh_target_display(self) -> None:
+        backend = self.get_backend_name()
+
+        if backend == "tmux":
+            target = str(getattr(self.cfg, "TmuxPane", "") or "").strip()
+            if not target:
+                target = str(getattr(self.cfg, "TmuxSession", "") or "").strip()
+
+            self.target_var.set(
+                f"Backend: tmux    Target: {target or '(none)'}"
+            )
+            return
+
+        if backend == "x11":
+            target = self.window_id or "(none)"
+            self.target_var.set(
+                f"Backend: x11    Target: {target}"
+            )
+            return
+
+        self.target_var.set(
+            f"Backend: {backend}    Target: (n/a)"
+        )
+
     def show_error(self, title: str, message: str) -> None:
         messagebox.showerror(title, message)
 
     def load_state(self) -> None:
         self.last_window_id = None
         self.command_history = []
+        self.gnome_selected_window = None
         if not STATE_FILE.exists():
             return
         try:
@@ -429,14 +455,34 @@ class TermForgeApp:
             history = data.get("command_history", [])
             if isinstance(history, list):
                 self.command_history = history[:MAX_HISTORY]
+
+            saved_gnome_window = data.get("gnome_selected_window")
+
+            if isinstance(saved_gnome_window, dict):
+                try:
+                    from .gnome_window_discovery import validate_window
+
+                    self.gnome_selected_window = validate_window(
+                        saved_gnome_window
+                    )
+                except Exception as exc:
+                    self.gnome_selected_window = None
+                    self.log(
+                        f"GNOME window restoration skipped: {exc}"
+                    )
         except Exception as exc:
             self.show_traceback_window("Could not load state file: ", exc)
 
     def save_state(self) -> None:
         try:
             payload = {
-                "last_window_id": self.window_id if self.window_id is not None else self.last_window_id,
+                "last_window_id": (
+                    self.window_id
+                    if self.window_id is not None
+                    else self.last_window_id
+                ),
                 "command_history": self.command_history[:MAX_HISTORY],
+                "gnome_selected_window": self.gnome_selected_window,
             }
             STATE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except Exception as exc:
@@ -899,6 +945,7 @@ class TermForgeApp:
         self.backend = self.create_backend()
 
         self.persist_full_config()
+        self.refresh_target_display()
         self.set_status(f"Backend selected: {name}")
 
     def create_backend(self):
@@ -3005,6 +3052,31 @@ class TermForgeApp:
     def select_profile(self, profile_name: str) -> None:
         self.select_window_profile(profile_name)
 
+    def select_tmux_target(self, target: str) -> None:
+        target = str(target).strip()
+
+        if not target:
+            raise TermForgeError("tmux target is required.")
+
+        if ":" not in target:
+            raise TermForgeError(
+                f"Invalid tmux target: {target!r}. "
+                "Expected something like 'stage-main:0.0'."
+            )
+
+        session = target.split(":", 1)[0]
+
+        setattr(self.cfg, "TmuxSession", session)
+        setattr(self.cfg, "TmuxPane", target)
+
+        self.persist_full_config()
+
+        if self.get_backend_name() != "tmux":
+            self.set_backend_name("tmux")
+
+        self.refresh_target_display()
+        self.set_status(f"Selected tmux target: {target}")
+
     def resolve_command_placeholders(self, cmd: str, shared_vars: dict[str, str] | None = None):
         if not isinstance(cmd, str):
             return cmd
@@ -3336,6 +3408,10 @@ class TermForgeApp:
         try:
             if normalized == "chain":
                 self.run_chain(cmd, source="chain")
+                return
+
+            if normalized == "select_tmux":
+                self.select_tmux_target(str(cmd))
                 return
 
             resolved_cmd = cmd
@@ -4202,6 +4278,19 @@ class TermForgeApp:
 
         Label(
             frame,
+            textvariable=self.target_var,
+            anchor="w",
+            justify="left",
+            width=40,
+            bg="#d9edf7",
+            fg="black",
+            relief="groove",
+            padx=6,
+            pady=4,
+        ).pack(fill=X, pady=(4, 0))
+
+        Label(
+            frame,
             textvariable=self.status_var,
             anchor="w",
             justify="left",
@@ -4213,6 +4302,8 @@ class TermForgeApp:
             padx=6,
             pady=4,
         ).pack(fill=X, pady=(4, 0))
+
+        self.refresh_target_display()
 
     def open_category(self, category: str) -> None:
         win = Toplevel(self.root)

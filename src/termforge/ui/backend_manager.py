@@ -3,7 +3,9 @@ import pprint
 from tkinter import *
 from tkinter import messagebox
 
+from .gnome_window_picker import GnomeWindowPickerWindow
 from ..backends import X11Backend, SubprocessBackend, TmuxBackend
+from ..gnome_window_discovery import validate_window
 
 class BackendManagerWindow:
     def __init__(self, app):
@@ -21,12 +23,52 @@ class BackendManagerWindow:
         action_row = Frame(outer)
         action_row.pack(fill=X, pady=(0, 8))
 
+        discovery_row = Frame(outer)
+        discovery_row.pack(fill=X, pady=(0, 8))
+
+        Button(
+            discovery_row,
+            text="GNOME Windows",
+            width=18,
+            bg="#555577",
+            fg="white",
+            command=self.pick_gnome_window,
+        ).pack(side=LEFT, padx=(0, 6))
+
         Button(action_row, text="Auto-detect", width=14, bg="#555577", fg="white", command=self.auto_detect_backend,).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Apply Backend", width=16, bg="darkgreen", fg="white", command=self.apply_backend,).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Test Backend", width=14, bg="#2f5597", fg="white", command=self.test_backend,).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Pick Tmux Target", width=18, bg="#555577", fg="white", command=self.pick_tmux_target,).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Attach Tmux", width=14, bg="#3d6d3d", fg="white", command=self.attach_tmux,).pack(side=LEFT, padx=(0, 6))
         Button(action_row, text="Close", width=14, bg="red", fg="black", command=self.window.destroy,).pack(side=RIGHT)
+
+# GNOME graphical window selection
+        gnome_frame = Frame(outer, bd=2, relief="groove", padx=8, pady=6)
+        gnome_frame.pack(fill=X, pady=(0, 8))
+
+        Label(
+            gnome_frame,
+            text="Selected GNOME Window",
+            font=("TkDefaultFont", 10, "bold"),
+            anchor="w",
+        ).pack(fill=X)
+
+        self.gnome_window_var = StringVar(value="Checking selection...")
+
+        Label(
+            gnome_frame,
+            textvariable=self.gnome_window_var,
+            anchor="w",
+            justify=LEFT,
+            wraplength=780,
+        ).pack(fill=X)
+
+        Button(
+            gnome_frame,
+            text="Refresh Status",
+            width=16,
+            command=self.refresh_gnome_selection,
+        ).pack(anchor="w", pady=(6, 0))
 
         self.backend_var = StringVar(value=app.get_backend_name())
 
@@ -66,6 +108,8 @@ class BackendManagerWindow:
                 self.refresh_info()
         except Exception:
             pass
+
+        self.refresh_gnome_selection()
 
     def refresh_info(self):
         report = self.app.backend_health_report()
@@ -123,6 +167,41 @@ class BackendManagerWindow:
 
         self.info.delete("1.0", END)
         self.info.insert("1.0", "\n".join(lines))
+
+    def refresh_gnome_selection(self):
+        saved = getattr(self.app, "gnome_selected_window", None)
+
+        if not saved:
+            self.gnome_window_var.set(
+                "Window: (none)\n"
+                "Status: No GNOME window selected"
+            )
+            return
+
+        try:
+            current = validate_window(saved)
+        except Exception as exc:
+            self.gnome_window_var.set(
+                f"Window: {saved.get('title', '(unknown)')}\n"
+                f"Status: Validation unavailable — {exc}"
+            )
+            return
+
+        if current is None:
+            self.gnome_window_var.set(
+                f"Window: {saved.get('title', '(unknown)')}\n"
+                f"ID: {saved.get('id', '(unknown)')}\n"
+                "Status: Window no longer valid"
+            )
+            return
+
+        self.app.gnome_selected_window = current
+
+        self.gnome_window_var.set(
+            f"Window: {current.get('title', '(unknown)')}\n"
+            f"ID: {current.get('id', '(unknown)')}\n"
+            "Status: Valid"
+        )
 
     def auto_detect_backend(self):
         try:
@@ -188,6 +267,9 @@ class BackendManagerWindow:
                 self.refresh_info()
         except Exception:
             pass
+
+    def pick_gnome_window(self):
+        GnomeWindowPickerWindow(self.app)
 
     def attach_tmux(self):
         try:
