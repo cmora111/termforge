@@ -1,7 +1,9 @@
+import os
 import shlex
 import shutil
 import subprocess
 from .base import BackendBase, BackendError
+from .tilix_tabs import activate_for_target
 from ..errors import TermForgeError
 
 class TmuxBackend(BackendBase):
@@ -15,6 +17,21 @@ class TmuxBackend(BackendBase):
 
     def __init__(self, app):
         self.app = app
+
+    def tmux_command(self) -> list[str]:
+        """Use the same server as the TermForge workspace launcher.
+
+        The recovered server uses an empty -S argument. Override with
+        TERMFORGE_TMUX_SOCKET=default or an absolute socket path.
+        """
+        socket = os.environ.get("TERMFORGE_TMUX_SOCKET", "empty")
+        if socket == "empty":
+            return ["tmux", "-S", ""]
+        if socket == "default":
+            return ["tmux"]
+        if socket.startswith("/"):
+            return ["tmux", "-S", socket]
+        raise TermForgeError("Invalid TERMFORGE_TMUX_SOCKET setting")
 
     def get_mode(self) -> str:
         return str(getattr(self.app.cfg, "TmuxMode", "pane") or "pane").lower()
@@ -34,7 +51,7 @@ class TmuxBackend(BackendBase):
 
         result = subprocess.run(
             [
-                "tmux",
+                *self.tmux_command(),
                 "list-panes",
                 "-a",
                 "-F",
@@ -91,7 +108,7 @@ class TmuxBackend(BackendBase):
         session = self.get_session()
 
         result = subprocess.run(
-            ["tmux", "has-session", "-t", session],
+            [*self.tmux_command(), "has-session", "-t", session],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -99,7 +116,7 @@ class TmuxBackend(BackendBase):
 
         if result.returncode != 0:
             subprocess.run(
-                ["tmux", "new-session", "-d", "-s", session],
+                [*self.tmux_command(), "new-session", "-d", "-s", session],
                 check=True,
             )
 
@@ -113,7 +130,7 @@ class TmuxBackend(BackendBase):
                 "No terminal window selected for tmux attach."
             )
 
-        command = f"tmux attach -t {shlex.quote(self.get_session())}"
+        command = " ".join(shlex.quote(arg) for arg in self.tmux_command()) + f" attach -t {shlex.quote(self.get_session())}"
 
         # Reuse TermForge's existing X11 send path.
         self.app.send_to_selected_window(
@@ -132,7 +149,7 @@ class TmuxBackend(BackendBase):
 
         result = subprocess.run(
             [
-                "tmux",
+                *self.tmux_command(),
                 "display-message",
                 "-p",
                 "-t",
@@ -165,21 +182,29 @@ class TmuxBackend(BackendBase):
 
         target = self.target()
 
+        # Tab activation is best-effort; preserve the existing tmux delivery path.
+        try:
+            _, activation_note = activate_for_target(target)
+        except Exception as exc:
+            activation_note = f"Tilix activation skipped: {exc}"
+
         subprocess.run(
-            ["tmux", "send-keys", "-t", target, text],
+            [*self.tmux_command(), "send-keys", "-t", target, text],
             check=True,
         )
 
         subprocess.run(
-            ["tmux", "send-keys", "-t", target, "C-m"],
+            [*self.tmux_command(), "send-keys", "-t", target, "C-m"],
             check=True,
         )
 
-        self.app.set_status(f"Sent command to tmux pane: {target}")
+        self.app.set_status(
+            f"Sent command to tmux pane: {target}; {activation_note}"
+        )
 
         if record_history:
             self.app.add_history_entry(
-                "tmux",
+                2,
                 text,
                 source="backend",
             )
@@ -191,7 +216,7 @@ class TmuxBackend(BackendBase):
 
         result = subprocess.run(
             [
-                "tmux",
+                *self.tmux_command(),
                 "new-window",
                 "-t",
                 f"{session}:",
@@ -217,7 +242,7 @@ class TmuxBackend(BackendBase):
 
         if record_history:
             self.app.add_history_entry(
-                "tmux",
+                *self.tmux_command(),
                 command,
                 source="backend",
             )
@@ -256,7 +281,7 @@ class TmuxBackend(BackendBase):
 
         result = subprocess.run(
             [
-                "tmux",
+                *self.tmux_command(),
                 "capture-pane",
                 "-t",
                 target,
