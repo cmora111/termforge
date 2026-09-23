@@ -320,6 +320,7 @@ class CommandEditorWindow:
             "Detached Command": "3",
             "Chain": "chain",
             "Plugin": "plugin",
+            "Browser URL / Search": "browser",
         }
 
         self.snapshot = []

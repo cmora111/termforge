@@ -1,5 +1,6 @@
 from __future__ import annotations
 from .backends.base import BackendError
+from .browser_actions import open_browser
 from .backends.x11_backend import X11Backend
 from .backends.tmux_backend import TmuxBackend
 from .backends.subprocess_backend import SubprocessBackend
@@ -3417,7 +3418,7 @@ class TermForgeApp:
             resolved_cmd = cmd
 
             if (
-                normalized in (1, 2, 3, "spawn", "command", "send", "detached")
+                normalized in (1, 2, 3, "spawn", "command", "send", "detached", "browser")
                 and isinstance(cmd, str)
             ):
                 resolved_cmd = self.resolve_command_placeholders(
@@ -3470,6 +3471,12 @@ class TermForgeApp:
                     str(resolved_cmd),
                     record_history=record_history,
                 )
+
+            elif normalized == "browser":
+                browser = str(options.get("browser", "firefox"))
+                mode = str(options.get("mode", "new-tab"))
+                url = open_browser(str(resolved_cmd), browser, mode)
+                self.set_status(f"Opened in {browser}: {url}")
 
             elif normalized == "plugin":
                 self.run_plugin(cmd)
